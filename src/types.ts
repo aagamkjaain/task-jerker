@@ -30,6 +30,7 @@ export interface TaskType {
   impact?: number; // 1 to 10
   priorityScore?: number; // calculated priority engine score
   postponedCount?: number; // tracking procrastination
+  createdAt?: string; // ISO date string
 }
 
 export interface RiskAlert {

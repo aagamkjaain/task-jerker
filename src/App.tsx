@@ -45,6 +45,7 @@ export default function App() {
   // Task states (empty initially, loaded from Supabase)
   const [tasks, setTasks] = useState<TaskType[]>([]);
   const [session, setSession] = useState<any>(null);
+  const [initialPrompt, setInitialPrompt] = useState<string>('');
 
   // Form states for creating a new task
   const [newTaskTitle, setNewTaskTitle] = useState('');
@@ -150,7 +151,8 @@ export default function App() {
       difficulty: 5,
       impact: newTaskStatus === 'critical' ? 8 : newTaskStatus === 'normal' ? 6 : 4,
       postponedCount: 0,
-      subtasks: defaultSubtasks.map(text => ({ text, completed: false }))
+      subtasks: defaultSubtasks.map(text => ({ text, completed: false })),
+      createdAt: new Date().toISOString()
     };
 
     setTasks(prev => [newTask, ...prev]);
@@ -510,7 +512,8 @@ export default function App() {
         difficulty: t.difficulty,
         impact: t.impact,
         postponedCount: t.postponed_count,
-        subtasks: t.subtasks
+        subtasks: t.subtasks,
+        createdAt: t.created_at
       }));
       setTasks(mappedTasks);
       if (mappedTasks.length > 0 && !activeSessionTaskId) {
@@ -698,6 +701,11 @@ export default function App() {
             setSessionActive={setSessionActive}
             sessionTime={sessionTime}
             setSessionTime={setSessionTime}
+            onProcessTaskCommand={(prompt) => {
+              setInitialPrompt(prompt);
+              setActiveScreen('intelligence');
+            }}
+            session={session}
           />
         );
       case 'intelligence':
@@ -706,6 +714,8 @@ export default function App() {
             tasks={sortedTasks}
             setTasks={setTasks}
             onNavigate={(scr) => setActiveScreen(scr)}
+            initialPrompt={initialPrompt}
+            setInitialPrompt={setInitialPrompt}
           />
         );
       case 'architect':

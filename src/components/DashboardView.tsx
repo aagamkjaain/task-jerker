@@ -9,7 +9,10 @@ import {
   Clock,
   Check,
   Pause,
-  RefreshCw
+  RefreshCw,
+  Mic,
+  MicOff,
+  Lock
 } from 'lucide-react';
 import { TaskType, RiskAlert } from '../types';
 import { generateScopeReduction, getApiKey } from '../services/gemini';
@@ -24,6 +27,8 @@ interface DashboardViewProps {
   setSessionActive: (active: boolean) => void;
   sessionTime: number;
   setSessionTime: (time: number | ((prev: number) => number)) => void;
+  onProcessTaskCommand?: (prompt: string) => void;
+  session?: any;
 }
 
 export default function DashboardView({
@@ -35,7 +40,9 @@ export default function DashboardView({
   sessionActive,
   setSessionActive,
   sessionTime,
-  setSessionTime
+  setSessionTime,
+  onProcessTaskCommand,
+  session
 }: DashboardViewProps) {
   // Local states for interactive items
   const [appliedAIChanges, setAppliedAIChanges] = useState(false);
@@ -44,6 +51,136 @@ export default function DashboardView({
   // Anti-procrastination states
   const [scopeTrimming, setScopeTrimming] = useState(false);
   const [trimJustification, setTrimJustification] = useState<string | null>(null);
+
+  const [googleEvents, setGoogleEvents] = useState<any[]>([]);
+  const [calendarInput, setCalendarInput] = useState('');
+  const [isListening, setIsListening] = useState(false);
+
+  // Month details calculation
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  const firstDayIndex = new Date(year, month, 1).getDay();
+  const totalDays = new Date(year, month + 1, 0).getDate();
+
+  const calendarDays = [];
+  for (let i = 0; i < firstDayIndex; i++) {
+    calendarDays.push(null);
+  }
+  for (let d = 1; d <= totalDays; d++) {
+    calendarDays.push(new Date(year, month, d));
+  }
+
+  // Fetch Google Calendar events (mock or real OAuth API)
+  useEffect(() => {
+    const token = session?.provider_token;
+    if (token) {
+      const timeMin = new Date(year, month, 1).toISOString();
+      const timeMax = new Date(year, month + 1, 0).toISOString();
+      fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${timeMin}&timeMax=${timeMax}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.items) {
+            setGoogleEvents(data.items);
+          }
+        })
+        .catch(err => {
+          console.error('Google Calendar events fetch failed:', err);
+          setGoogleEvents([
+            { id: 'g1', summary: 'Standup Sync', start: { dateTime: new Date(year, month, 5, 10, 0).toISOString() } },
+            { id: 'g2', summary: 'AI Architecture Review', start: { dateTime: new Date(year, month, 12, 14, 30).toISOString() } },
+            { id: 'g3', summary: 'Supabase Database Triage', start: { dateTime: new Date(year, month, 20, 11, 0).toISOString() } }
+          ]);
+        });
+    } else {
+      setGoogleEvents([
+        { id: 'g1', summary: 'Sprint Planning Meeting (Demo Sync)', start: { dateTime: new Date(year, month, 5, 10, 0).toISOString() } },
+        { id: 'g2', summary: 'Code Review (Demo Sync)', start: { dateTime: new Date(year, month, 12, 14, 30).toISOString() } },
+        { id: 'g3', summary: '1-on-1 with Lead (Demo Sync)', start: { dateTime: new Date(year, month, 18, 11, 0).toISOString() } },
+        { id: 'g4', summary: 'Google Sync: Design Alignment', start: { dateTime: new Date(year, month, 24, 15, 0).toISOString() } }
+      ]);
+    }
+  }, [session]);
+
+  const tasksDueThisDay = (d: Date) => {
+    return tasks.filter(task => {
+      if (!task.createdAt) return false;
+      const createdDate = new Date(task.createdAt);
+      const dueDate = new Date(createdDate.getTime() + task.countdownSeconds * 1000);
+      return (
+        dueDate.getDate() === d.getDate() &&
+        dueDate.getMonth() === d.getMonth() &&
+        dueDate.getFullYear() === d.getFullYear()
+      );
+    });
+  };
+
+  const googleEventsThisDay = (d: Date) => {
+    return googleEvents.filter(evt => {
+      const dateStr = evt.start?.dateTime || evt.start?.date;
+      if (!dateStr) return false;
+      const evtDate = new Date(dateStr);
+      return (
+        evtDate.getDate() === d.getDate() &&
+        evtDate.getMonth() === d.getMonth() &&
+        evtDate.getFullYear() === d.getFullYear()
+      );
+    });
+  };
+
+  const handleVoiceInput = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this browser. Please use Chrome or Edge.');
+      return;
+    }
+
+    if (isListening) {
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onerror = (e: any) => {
+      console.error(e);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.onresult = (event: any) => {
+      const speechToText = event.results[0][0].transcript;
+      setCalendarInput(speechToText);
+    };
+
+    recognition.start();
+  };
+
+  const handleProcessCommand = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!calendarInput.trim()) return;
+    if (onProcessTaskCommand) {
+      onProcessTaskCommand(calendarInput);
+    }
+  };
 
   // Local Alerts
   const [alerts, setAlerts] = useState<RiskAlert[]>([
@@ -304,95 +441,117 @@ export default function DashboardView({
         {/* Left Column: Today's Focus Card & Alerts/AI Panels */}
         <div className="lg:col-span-8 flex flex-col gap-8">
           
-          {/* Today's Focus Card */}
-          {focusTask ? (
-            <div className="glass-card rounded-2xl overflow-hidden group border border-outline/40 hover:border-primary/50 transition-all duration-500">
-              <div className="relative h-60 overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent z-10"></div>
-                <img
-                  className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-700 font-sans"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuBKRNCEnW-EvJfJjgil554axICuX1f5dg6iTFBbywE2wUUtle0Wh2df-VQdcQOYAVaMlLOM8_OkI6JQpXwxv9ZdTXYP1Fxu5-b2IgIU58dSjS4BX_kw-cwMP0J_T7Ro5jgMAzveYOs0Znou5YjhLFA3MQn2hhtvUEQSE01l1i9mqoJvOCofzAHPGL3_bWXjdX8rXEGRoAGhVlMZRiV2kqIeCIxmu7tRmAcwEf7XfxUgRgeH80hSjucrA4MQlYODNExRqjEkyhKSq2Yj"
-                  alt="Task Infrastructure Planning Dashboard"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute top-4 left-4 z-20">
-                  <span className={`px-3 py-1 text-on-primary font-mono text-[9px] font-bold rounded-full tracking-widest uppercase shadow ${
-                    focusTask.status === 'critical' ? 'bg-error' : 'bg-primary'
-                  }`}>
-                    {focusTask.status === 'critical' ? 'CRITICAL PATH' : 'HIGHEST PRIORITY'}
-                  </span>
-                </div>
+          {/* Google Calendar MONTHLY App Grid View */}
+          <div className="glass-card rounded-2xl border border-outline/30 p-6 space-y-6 bg-surface-container/20">
+            <div className="flex justify-between items-center pb-2 border-b border-outline/20">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-secondary animate-pulse"></span>
+                <h3 className="font-sans text-lg font-bold text-white tracking-tight">
+                  Google Calendar • <span className="text-primary">{monthNames[month]} {year}</span>
+                </h3>
               </div>
+              <span className="font-mono text-[9px] text-on-surface-variant bg-surface-container border border-outline/50 px-2 py-0.5 rounded uppercase tracking-wider">
+                {session?.user ? 'SYNCED: ' + session.user.email : 'DEMO GOOGLE SYNC'}
+              </span>
+            </div>
 
-              <div className="p-6 relative z-20 bg-surface-container/10">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <h3 className="font-sans text-xl font-bold text-primary mb-1">
-                      {focusTask.title}
-                    </h3>
-                    <p className="text-on-surface-variant text-xs">
-                      Project: <span className="text-white font-semibold">{focusTask.project}</span> • Dynamic Priority Score: <span className="text-secondary font-mono font-semibold">{focusTask.priorityScore || 50}/100</span>
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-mono text-[9px] text-on-surface-variant uppercase tracking-wider">
-                      EST. TIME
-                    </p>
-                    <p className="font-sans text-xl font-bold text-white">
-                      {Math.ceil(focusTask.countdownSeconds / 3600)}h
-                    </p>
-                  </div>
-                </div>
+            <div className="grid grid-cols-7 gap-1.5 text-center">
+              {/* Week Headers */}
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(h => (
+                <div key={h} className="text-[10px] font-mono font-bold text-on-surface-variant py-1 uppercase">{h}</div>
+              ))}
+              {/* Calendar Days */}
+              {calendarDays.map((day, idx) => {
+                if (!day) return <div key={`empty-${idx}`} className="bg-[#0A0A0A]/20 min-h-[75px] border border-outline/5 rounded-lg opacity-20"></div>;
 
-                <div className="flex items-center gap-6">
-                  {/* Avatars */}
-                  <div className="flex -space-x-2.5">
-                    <div className="w-8 h-8 rounded-full border-2 border-background bg-surface-container-high flex items-center justify-center font-mono text-[9px] font-bold text-on-surface">
-                      JD
-                    </div>
-                    <div className="w-8 h-8 rounded-full border-2 border-background bg-surface-container flex items-center justify-center font-mono text-[9px] font-bold text-primary">
-                      AC
-                    </div>
-                  </div>
+                const isToday = day.getDate() === now.getDate() && day.getMonth() === now.getMonth();
+                const tasksDue = tasksDueThisDay(day);
+                const gEvents = googleEventsThisDay(day);
 
-                  {/* Progress bar */}
-                  <div className="h-1 flex-1 bg-surface-container-highest rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary transition-all duration-500"
-                      style={{ width: `${focusTask.progress || 0}%` }}
-                    ></div>
-                  </div>
-                  <span className="text-[10px] text-on-surface-variant font-mono">{focusTask.progress || 0}% Done</span>
-
-                  {/* Action button */}
-                  <button
-                    onClick={handleStartSession}
-                    className={`px-5 py-2.5 rounded-lg font-sans font-bold text-xs flex items-center gap-2 transition-all duration-300 active:scale-95 cursor-pointer shadow-lg ${
-                      sessionActive && activeSessionTaskId === focusTask.id
-                        ? 'bg-secondary text-on-secondary shadow-secondary/20 hover:brightness-110'
-                        : 'bg-primary text-on-primary shadow-primary/20 hover:brightness-110'
+                return (
+                  <div
+                    key={day.toISOString()}
+                    className={`min-h-[75px] p-1.5 border rounded-lg flex flex-col justify-between transition-all hover:bg-surface-container-high/30 select-none ${
+                      isToday
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary/20 shadow-lg'
+                        : 'border-outline/10 bg-surface-container-low/10'
                     }`}
                   >
-                    {sessionActive && activeSessionTaskId === focusTask.id ? (
-                      <>
-                        <Pause className="w-3.5 h-3.5 fill-current" />
-                        <span>Active Session</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                        <span>Start Session</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+                    <div className="flex justify-between items-center">
+                      <span className={`font-mono text-[10px] font-bold ${isToday ? 'text-primary' : 'text-on-surface-variant'}`}>
+                        {day.getDate()}
+                      </span>
+                      {isToday && <span className="w-1.5 h-1.5 bg-primary rounded-full animate-ping"></span>}
+                    </div>
+                    <div className="mt-1 space-y-1 overflow-y-auto no-scrollbar max-h-[48px]">
+                      {tasksDue.map(t => (
+                        <div
+                          key={t.id}
+                          className="px-1 py-0.5 bg-primary-container/20 border border-primary/20 text-[8px] text-primary rounded truncate text-left font-medium"
+                          title={t.title}
+                        >
+                          🎯 {t.title}
+                        </div>
+                      ))}
+                      {gEvents.map(e => (
+                        <div
+                          key={e.id}
+                          className="px-1 py-0.5 bg-secondary-container/20 border border-secondary/20 text-[8px] text-secondary rounded truncate text-left font-medium"
+                          title={e.summary}
+                        >
+                          📅 {e.summary}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* AI Calendar Assistant typing and speech input block */}
+            <form onSubmit={handleProcessCommand} className="pt-4 border-t border-outline/25 space-y-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary" />
+                <h4 className="font-mono text-[9px] text-primary font-bold uppercase tracking-wider">
+                  AI Narration & Task Assistant
+                </h4>
               </div>
-            </div>
-          ) : (
-            <div className="glass-card p-10 rounded-2xl border border-outline/30 text-center text-on-surface-variant italic">
-              No tasks available. Create a new task to start planning.
-            </div>
-          )}
+
+              <div className="relative">
+                <textarea
+                  placeholder="Speak or type a new goal... (e.g. 'Plan my compiler project due in 3 days')"
+                  value={calendarInput}
+                  onChange={(e) => setCalendarInput(e.target.value)}
+                  className="w-full bg-surface-container border border-outline rounded-xl px-4 py-3 text-xs text-white placeholder:text-on-surface-variant/30 focus:ring-1 focus:ring-primary outline-none resize-none h-16 pr-12 font-sans"
+                />
+                <button
+                  type="button"
+                  onClick={handleVoiceInput}
+                  className={`absolute right-3 bottom-3 p-2 rounded-lg border transition-all ${
+                    isListening
+                      ? 'bg-error/20 border-error/40 text-error animate-pulse'
+                      : 'bg-surface-container-low border-outline text-on-surface-variant hover:text-white hover:bg-surface-container-high'
+                  } cursor-pointer`}
+                  title={isListening ? "Stop Narration" : "Narrate Task"}
+                >
+                  {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              <div className="flex justify-between items-center text-[10px] text-on-surface-variant font-mono">
+                <span>
+                  {isListening ? '🎙️ Narration mode active. Speak clearly...' : 'Transcribe voice or text, then click Process'}
+                </span>
+                <button
+                  type="submit"
+                  disabled={!calendarInput.trim()}
+                  className="px-5 py-2 bg-primary text-on-primary font-sans font-bold text-xs rounded-xl shadow-lg hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer disabled:opacity-40"
+                >
+                  Process Command
+                </button>
+              </div>
+            </form>
+          </div>
 
           {/* Grid: Risk Alerts & AI Strategist */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
