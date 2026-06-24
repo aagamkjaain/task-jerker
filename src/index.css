@@ -1,0 +1,180 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Geist", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Custom palette matching Obsidian Precision */
+  --color-surface: #111111;
+  --color-surface-dim: #111111;
+  --color-surface-bright: #1c1c1c;
+  --color-surface-container-lowest: #050505;
+  --color-surface-container-low: #0a0a0a;
+  --color-surface-container: #141414;
+  --color-surface-container-high: #1e1e1e;
+  --color-surface-container-highest: #282828;
+  --color-on-surface: #e5e2e1;
+  --color-on-surface-variant: #a1a1aa;
+  --color-inverse-surface: #e5e2e1;
+  --color-inverse-on-surface: #18181b;
+  --color-outline: #2a2a2a;
+  --color-outline-variant: #3f3f46;
+  --color-surface-tint: #afc6ff;
+  --color-primary: #afc6ff;
+  --color-on-primary: #002d6c;
+  --color-primary-container: #223e75;
+  --color-on-primary-container: #afc6ff;
+  --color-inverse-primary: #0059c6;
+  --color-secondary: #4edea3;
+  --color-on-secondary: #003824;
+  --color-secondary-container: #1b4d3e;
+  --color-on-secondary-container: #4edea3;
+  --color-tertiary: #ffb95f;
+  --color-on-tertiary: #472a00;
+  --color-tertiary-container: #ca8100;
+  --color-on-tertiary-container: #3e2400;
+  --color-error: #ffb4ab;
+  --color-on-error: #690005;
+  --color-error-container: #4c050a;
+  --color-on-error-container: #ffdad6;
+  --color-background: #0a0a0a;
+  --color-on-background: #e5e2e1;
+  --color-surface-variant: #1c1c1c;
+}
+
+/* Base style settings */
+body {
+  background-color: var(--color-background);
+  color: var(--color-on-surface);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+/* Glass panel background helper */
+.glass-panel {
+  background: rgba(17, 17, 17, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(63, 63, 70, 0.3);
+}
+
+.glass-card {
+  background: rgba(19, 19, 19, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(63, 63, 70, 0.3);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  border-color: #afc6ff;
+  background: rgba(23, 23, 23, 0.9);
+}
+
+/* Custom glow effects */
+.risk-glow-red {
+  box-shadow: 0 0 20px rgba(147, 0, 10, 0.15);
+}
+
+.timer-glow {
+  text-shadow: 0 0 30px rgba(175, 198, 255, 0.35);
+}
+
+.shimmer-text {
+  background: linear-gradient(90deg, #afc6ff, #528dff, #afc6ff);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 3s linear infinite;
+}
+
+@keyframes shimmer {
+  to { background-position: 200% center; }
+}
+
+/* Pulsing red light */
+.panic-pulse {
+  animation: pulse-red 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% {
+    border-color: rgba(147, 0, 10, 0.4);
+    box-shadow: 0 0 0 0 rgba(147, 0, 10, 0);
+  }
+  50% {
+    border-color: rgba(255, 180, 171, 0.8);
+    box-shadow: 0 0 20px 2px rgba(147, 0, 10, 0.3);
+  }
+}
+
+/* Scanline visual effect */
+.scanline {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(147, 0, 10, 0.5), transparent);
+  position: absolute;
+  top: 0;
+  animation: scan 4s linear infinite;
+}
+
+@keyframes scan {
+  from { top: 0; }
+  to { top: 100%; }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+/* Hide scrollbars class */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Subtle bounce */
+@keyframes bounce-slow {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-bounce-slow {
+  animation: bounce-slow 4s infinite ease-in-out;
+}
+
+/* Waveform anim */
+.waveform-bar {
+  width: 3px;
+  background: #afc6ff;
+  border-radius: 99px;
+  animation: waveform-grow 1.2s ease-in-out infinite;
+}
+
+@keyframes waveform-grow {
+  0%, 100% { height: 4px; }
+  50% { height: 16px; }
+}
