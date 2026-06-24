@@ -2,19 +2,12 @@ import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   AlertTriangle,
-  ArrowRight,
-  Play,
-  CheckCircle,
   CalendarDays,
-  Clock,
-  Check,
-  Pause,
   RefreshCw,
   Mic,
-  MicOff,
-  Lock
+  MicOff
 } from 'lucide-react';
-import { TaskType, RiskAlert } from '../types';
+import { TaskType } from '../types';
 import { generateScopeReduction, getApiKey } from '../services/gemini';
 
 interface DashboardViewProps {
@@ -44,10 +37,6 @@ export default function DashboardView({
   onProcessTaskCommand,
   session
 }: DashboardViewProps) {
-  // Local states for interactive items
-  const [appliedAIChanges, setAppliedAIChanges] = useState(false);
-  const [checkedAlerts, setCheckedAlerts] = useState<string[]>([]);
-
   // Anti-procrastination states
   const [scopeTrimming, setScopeTrimming] = useState(false);
   const [trimJustification, setTrimJustification] = useState<string | null>(null);
@@ -94,19 +83,10 @@ export default function DashboardView({
         })
         .catch(err => {
           console.error('Google Calendar events fetch failed:', err);
-          setGoogleEvents([
-            { id: 'g1', summary: 'Standup Sync', start: { dateTime: new Date(year, month, 5, 10, 0).toISOString() } },
-            { id: 'g2', summary: 'AI Architecture Review', start: { dateTime: new Date(year, month, 12, 14, 30).toISOString() } },
-            { id: 'g3', summary: 'Supabase Database Triage', start: { dateTime: new Date(year, month, 20, 11, 0).toISOString() } }
-          ]);
+          setGoogleEvents([]);
         });
     } else {
-      setGoogleEvents([
-        { id: 'g1', summary: 'Sprint Planning Meeting (Demo Sync)', start: { dateTime: new Date(year, month, 5, 10, 0).toISOString() } },
-        { id: 'g2', summary: 'Code Review (Demo Sync)', start: { dateTime: new Date(year, month, 12, 14, 30).toISOString() } },
-        { id: 'g3', summary: '1-on-1 with Lead (Demo Sync)', start: { dateTime: new Date(year, month, 18, 11, 0).toISOString() } },
-        { id: 'g4', summary: 'Google Sync: Design Alignment', start: { dateTime: new Date(year, month, 24, 15, 0).toISOString() } }
-      ]);
+      setGoogleEvents([]);
     }
   }, [session]);
 
@@ -182,12 +162,6 @@ export default function DashboardView({
     }
   };
 
-  // Local Alerts
-  const [alerts, setAlerts] = useState<RiskAlert[]>([
-    { id: 'a1', title: 'Client Feedback Loop', timeStatus: '3h overdue • Escalation risk: High', level: 'high' },
-    { id: 'a2', title: 'Security Audit Logs', timeStatus: 'Due in 2h • Dependencies pending', level: 'medium' }
-  ]);
-
   const formatSessionTime = (secs: number) => {
     const m = Math.floor(secs / 60).toString().padStart(2, '0');
     const s = (secs % 60).toString().padStart(2, '0');
@@ -199,14 +173,6 @@ export default function DashboardView({
     const m = Math.floor((secs % 3600) / 60).toString().padStart(2, '0');
     const s = (secs % 60).toString().padStart(2, '0');
     return `${h}:${m}:${s}`;
-  };
-
-  const toggleAlert = (id: string) => {
-    if (checkedAlerts.includes(id)) {
-      setCheckedAlerts(checkedAlerts.filter((item) => item !== id));
-    } else {
-      setCheckedAlerts([...checkedAlerts, id]);
-    }
   };
 
   // Find highly postponed tasks (Feature 5: Anti-procrastination)
@@ -295,17 +261,14 @@ export default function DashboardView({
     }
   };
 
-  const handleApplyAIChanges = () => {
-    setAppliedAIChanges(true);
-    // Optimizing schedule shifts countdown of tasks to resolve risk overlap
-    setTasks(prev => prev.map(t => {
-      if (t.status === 'critical') {
-        // AI extends critical paths slightly or resolves conflict by delaying deferred items
-        return { ...t, countdownSeconds: t.countdownSeconds + 3600 * 2 };
-      }
-      return t;
-    }));
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
   };
+  const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User';
+  const criticalTasksCount = tasks.filter(t => t.status === 'critical').length;
 
   return (
     <div className="space-y-10 pb-20 select-none animate-in fade-in duration-500">
@@ -376,69 +339,34 @@ export default function DashboardView({
         </div>
       )}
 
-      {/* Greeting & Productivity Section */}
+      {/* Greeting Section */}
       <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
         <div className="lg:col-span-8">
           <h2 className="font-sans text-white text-3xl font-bold tracking-tight mb-3">
-            Good morning, Alex.
+            {getGreeting()}, {userName}.
           </h2>
           <p className="text-on-surface-variant text-base leading-relaxed max-w-2xl">
-            You have{' '}
-            <button
-              onClick={() => onNavigate('panicMode')}
-              className="text-error font-bold underline decoration-2 underline-offset-4 hover:text-error/80 transition-colors cursor-pointer bg-transparent border-none p-0 inline"
-            >
-              3 high-priority deadlines
-            </button>{' '}
-            pending. DeadlineOS has prioritized your active work blocks dynamically.
+            {criticalTasksCount > 0 ? (
+              <>
+                You have{' '}
+                <button
+                  onClick={() => onNavigate('panicMode')}
+                  className="text-error font-bold underline decoration-2 underline-offset-4 hover:text-error/80 transition-colors cursor-pointer bg-transparent border-none p-0 inline"
+                >
+                  {criticalTasksCount} high-priority {criticalTasksCount === 1 ? 'deadline' : 'deadlines'}
+                </button>{' '}
+                pending. DeadlineOS has prioritized your active work blocks dynamically.
+              </>
+            ) : (
+              'You have no high-priority deadlines pending. Keep up the good work!'
+            )}
           </p>
-        </div>
-
-        {/* Productivity Circle Score widget */}
-        <div className="lg:col-span-4 flex justify-end">
-          <div className="glass-card p-5 rounded-2xl flex items-center gap-5 w-fit bg-surface-container/40">
-            <div className="relative w-16 h-16 shrink-0">
-              <svg className="w-full h-full transform -rotate-90">
-                <circle
-                  className="text-surface-container-highest"
-                  cx="32"
-                  cy="32"
-                  fill="transparent"
-                  r="28"
-                  stroke="currentColor"
-                  strokeWidth="3.5"
-                ></circle>
-                <circle
-                  className="text-secondary transition-all duration-1000"
-                  cx="32"
-                  cy="32"
-                  fill="transparent"
-                  r="28"
-                  stroke="currentColor"
-                  strokeDasharray="175.9"
-                  strokeDashoffset={175.9 * (1 - 0.88)}
-                  strokeWidth="3.5"
-                ></circle>
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="font-mono text-sm font-bold text-secondary">88%</span>
-              </div>
-            </div>
-            <div>
-              <p className="font-mono text-[10px] text-on-surface-variant uppercase tracking-wider">
-                Productivity Score
-              </p>
-              <p className="text-sm text-white font-semibold mt-0.5">
-                +12% from yesterday
-              </p>
-            </div>
-          </div>
         </div>
       </section>
 
       {/* Main Bento Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Today's Focus Card & Alerts/AI Panels */}
+        {/* Left Column: Google Calendar */}
         <div className="lg:col-span-8 flex flex-col gap-8">
 
           {/* Google Calendar MONTHLY App Grid View */}
@@ -472,8 +400,8 @@ export default function DashboardView({
                   <div
                     key={day.toISOString()}
                     className={`min-h-[75px] p-1.5 border rounded-lg flex flex-col justify-between transition-all hover:bg-surface-container-high/30 select-none ${isToday
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary/20 shadow-lg'
-                        : 'border-outline/10 bg-surface-container-low/10'
+                      ? 'border-primary bg-primary/5 ring-1 ring-primary/20 shadow-lg'
+                      : 'border-outline/10 bg-surface-container-low/10'
                       }`}
                   >
                     <div className="flex justify-between items-center">
@@ -527,8 +455,8 @@ export default function DashboardView({
                   type="button"
                   onClick={handleVoiceInput}
                   className={`absolute right-3 bottom-3 p-2 rounded-lg border transition-all ${isListening
-                      ? 'bg-error/20 border-error/40 text-error animate-pulse'
-                      : 'bg-surface-container-low border-outline text-on-surface-variant hover:text-white hover:bg-surface-container-high'
+                    ? 'bg-error/20 border-error/40 text-error animate-pulse'
+                    : 'bg-surface-container-low border-outline text-on-surface-variant hover:text-white hover:bg-surface-container-high'
                     } cursor-pointer`}
                   title={isListening ? "Stop Narration" : "Narrate Task"}
                 >
@@ -550,96 +478,9 @@ export default function DashboardView({
               </div>
             </form>
           </div>
-
-          {/* Grid: Risk Alerts & AI Strategist */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-
-            {/* Risk Alerts Panel */}
-            <div className="glass-card rounded-2xl p-5 border-error/20 risk-glow-red flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-4">
-                  <AlertTriangle className="w-4 h-4 text-error animate-pulse" />
-                  <h4 className="font-mono text-[10px] text-error font-bold uppercase tracking-wider">
-                    Risk Alerts
-                  </h4>
-                </div>
-                <div className="space-y-3">
-                  {alerts.map((alert) => {
-                    const isChecked = checkedAlerts.includes(alert.id);
-                    return (
-                      <div
-                        key={alert.id}
-                        onClick={() => toggleAlert(alert.id)}
-                        className={`p-3 rounded border transition-all duration-200 cursor-pointer flex justify-between items-center ${isChecked
-                            ? 'bg-surface-container/30 border-outline/30 opacity-60'
-                            : alert.level === 'high'
-                              ? 'bg-error-container/10 border-error/30 hover:bg-error-container/15'
-                              : 'bg-tertiary-container/10 border-tertiary/30 hover:bg-tertiary-container/15'
-                          }`}
-                      >
-                        <div>
-                          <p className={`font-sans text-xs font-semibold ${isChecked ? 'line-through text-on-surface-variant' : 'text-white'}`}>
-                            {alert.title}
-                          </p>
-                          <p className="text-[10px] text-on-surface-variant mt-0.5">
-                            {alert.timeStatus}
-                          </p>
-                        </div>
-                        {isChecked && <Check className="w-3.5 h-3.5 text-secondary shrink-0" />}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              <button
-                onClick={() => onNavigate('panicMode')}
-                className="mt-4 font-mono text-[10px] text-error flex items-center justify-between hover:underline pt-2 border-t border-outline/20 bg-transparent text-left cursor-pointer border-none"
-              >
-                <span>VISIT PANIC MITIGATION PANEL</span>
-                <ArrowRight className="w-3 h-3 text-error" />
-              </button>
-            </div>
-
-            {/* AI Strategist Recommendations Panel */}
-            <div className="glass-card rounded-2xl p-5 border-primary/20 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-4">
-                  <Sparkles className="w-4 h-4 text-primary" />
-                  <h4 className="font-mono text-[10px] text-primary font-bold uppercase tracking-wider">
-                    AI Strategist
-                  </h4>
-                </div>
-                {appliedAIChanges ? (
-                  <div className="p-3 rounded bg-secondary-container/10 border border-secondary/30 text-xs text-on-surface-variant leading-relaxed animate-in zoom-in-95 duration-300">
-                    <div className="flex items-center gap-2 text-secondary font-bold mb-1">
-                      <CheckCircle className="w-3.5 h-3.5" />
-                      <span>Mitigation Applied</span>
-                    </div>
-                    Dynamic rescheduling completes. Added buffer blocks to critical paths automatically to prevent deadline conflicts.
-                  </div>
-                ) : (
-                  <p className="text-xs text-on-surface-variant leading-relaxed">
-                    "Based on your current progress and velocity, I suggest applying schedule buffers to your critical projects. I will delay the Docker Port Audits task automatically."
-                  </p>
-                )}
-              </div>
-              <button
-                disabled={appliedAIChanges}
-                onClick={handleApplyAIChanges}
-                className={`mt-4 font-mono text-[10px] flex items-center gap-1.5 pt-2 border-t border-outline/20 w-full transition-all bg-transparent border-none ${appliedAIChanges
-                    ? 'text-secondary/50 cursor-not-allowed'
-                    : 'text-primary hover:underline cursor-pointer'
-                  }`}
-              >
-                <span>{appliedAIChanges ? 'Changes Applied' : 'Apply Schedule Changes'}</span>
-                {!appliedAIChanges && <ArrowRight className="w-3 h-3 text-primary" />}
-              </button>
-            </div>
-
-          </div>
         </div>
 
-        {/* Right Column: Sidebar (Upcoming Deadlines & Weekly Velocity chart) */}
+        {/* Right Column: Sidebar (Upcoming Deadlines) */}
         <div className="lg:col-span-4 flex flex-col gap-6">
           <div className="flex items-center justify-between px-1">
             <h3 className="font-mono text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
@@ -675,10 +516,10 @@ export default function DashboardView({
                   <div className="flex justify-between items-start mb-3">
                     <span
                       className={`px-2 py-0.5 rounded font-mono text-[9px] font-bold tracking-wider ${isCritical
-                          ? 'bg-error-container/20 text-error border border-error/10'
-                          : isNormal
-                            ? 'bg-primary-container/20 text-primary border border-primary/10'
-                            : 'bg-secondary-container/20 text-secondary border border-secondary/10'
+                        ? 'bg-error-container/20 text-error border border-error/10'
+                        : isNormal
+                          ? 'bg-primary-container/20 text-primary border border-primary/10'
+                          : 'bg-secondary-container/20 text-secondary border border-secondary/10'
                         }`}
                     >
                       {task.status.toUpperCase()}
@@ -715,31 +556,6 @@ export default function DashboardView({
                 </div>
               );
             })}
-
-            {/* Weekly Velocity Chart Card */}
-            <div className="glass-card rounded-xl p-4 bg-gradient-to-br from-primary-container/10 to-transparent">
-              <h4 className="font-mono text-[10px] font-bold uppercase tracking-wider mb-4 flex items-center gap-2 text-white">
-                <Clock className="w-3.5 h-3.5 text-primary" />
-                <span>Weekly Velocity</span>
-              </h4>
-              <div className="flex items-end gap-1.5 h-12 px-2">
-                <div className="w-full bg-primary/20 h-1/2 rounded-t-sm" title="Monday"></div>
-                <div className="w-full bg-primary/20 h-2/3 rounded-t-sm" title="Tuesday"></div>
-                <div className="w-full bg-primary/40 h-1/3 rounded-t-sm" title="Wednesday"></div>
-                <div className="w-full bg-primary/20 h-4/5 rounded-t-sm" title="Thursday"></div>
-                <div className="w-full bg-primary h-full rounded-t-sm shadow shadow-primary/50 relative group" title="Wednesday (Peak!)">
-                  <span className="absolute -top-7 left-1/2 -translate-x-1/2 bg-surface border border-outline px-1 rounded font-mono text-[7px] text-white hidden group-hover:block whitespace-nowrap">
-                    100%
-                  </span>
-                </div>
-                <div className="w-full bg-primary/60 h-2/3 rounded-t-sm" title="Friday"></div>
-                <div className="w-full bg-primary/30 h-1/2 rounded-t-sm" title="Saturday"></div>
-              </div>
-              <p className="font-mono text-[8px] text-on-surface-variant mt-3 text-center opacity-70">
-                Peak efficiency reached on Wednesday
-              </p>
-            </div>
-
           </div>
         </div>
       </div>
