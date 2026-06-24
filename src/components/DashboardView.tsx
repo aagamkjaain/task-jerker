@@ -5,7 +5,8 @@ import {
   CalendarDays,
   RefreshCw,
   Mic,
-  MicOff
+  MicOff,
+  X
 } from 'lucide-react';
 import { TaskType } from '../types';
 import { generateScopeReduction, getApiKey } from '../services/gemini';
@@ -44,6 +45,14 @@ export default function DashboardView({
   const [googleEvents, setGoogleEvents] = useState<any[]>([]);
   const [calendarInput, setCalendarInput] = useState('');
   const [isListening, setIsListening] = useState(false);
+
+  // Date-click task addition states
+  const [clickedDate, setClickedDate] = useState<Date | null>(null);
+  const [clickedDateModalOpen, setClickedDateModalOpen] = useState(false);
+  const [clickedTaskTitle, setClickedTaskTitle] = useState('');
+  const [clickedTaskProject, setClickedTaskProject] = useState('Nexus Core');
+  const [clickedTaskStatus, setClickedTaskStatus] = useState<'critical' | 'normal' | 'deferred'>('normal');
+  const [isSavingTask, setIsSavingTask] = useState(false);
 
   // Month details calculation
   const now = new Date();
@@ -275,6 +284,109 @@ export default function DashboardView({
     }
   };
 
+  const handleDayClick = (day: Date) => {
+    setClickedDate(day);
+    setClickedTaskTitle('');
+    setClickedTaskProject('Nexus Core');
+    setClickedTaskStatus('normal');
+    setClickedDateModalOpen(true);
+  };
+
+  const handleClickedDateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!clickedDate || !clickedTaskTitle.trim()) return;
+
+    setIsSavingTask(true);
+    let dbTaskId = `t_${Date.now()}`;
+    const defaultSubtasks = [
+      'Initial design and outline requirements',
+      'Core feature development and implementation',
+      'Final verification and testing loop'
+    ];
+
+    // Calculate countdownSeconds based on clickedDate
+    const targetDate = new Date(clickedDate);
+    // Set due time to end of clicked day (23:59:59)
+    targetDate.setHours(23, 59, 59, 999);
+    const now = new Date();
+    let countdownSeconds = Math.round((targetDate.getTime() - now.getTime()) / 1000);
+    if (countdownSeconds < 0) {
+      countdownSeconds = 3 * 3600; // fallback to 3 hours
+    }
+
+    try {
+      const { createGoal, isSupabaseConfigured } = await import('../services/supabase');
+      if (session && session.user && isSupabaseConfigured()) {
+        try {
+          const dbTask = await createGoal(
+            session.user.id,
+            clickedTaskTitle,
+            clickedTaskProject,
+            3, // estimatedHours (default)
+            5, // difficulty (default)
+            clickedTaskStatus === 'critical' ? 8 : clickedTaskStatus === 'normal' ? 6 : 4, // impact
+            defaultSubtasks,
+            countdownSeconds
+          );
+          dbTaskId = dbTask.id;
+        } catch (dbErr) {
+          console.error('Failed to save clicked day task to Supabase:', dbErr);
+        }
+      }
+
+      // Automatically create Google Calendar event if provider_token is present
+      if (session?.provider_token) {
+        const startDateTime = new Date(targetDate.getTime() - 3600 * 1000).toISOString(); // 1 hour before end of day
+        const endDateTime = targetDate.toISOString();
+        try {
+          const res = await fetch(
+            'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${session.provider_token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                summary: `🎯 DeadlineOS: ${clickedTaskTitle}`,
+                description: `Project: ${clickedTaskProject}\nPriority: ${clickedTaskStatus.toUpperCase()}`,
+                start: { dateTime: startDateTime },
+                end: { dateTime: endDateTime }
+              })
+            }
+          );
+          if (!res.ok) {
+            console.error('Google Calendar event creation failed:', await res.text());
+          } else {
+            console.log('Successfully created Google Calendar event from date click!');
+          }
+        } catch (googleErr) {
+          console.error('Failed to sync to Google Calendar from date click:', googleErr);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create task on date click:', err);
+    } finally {
+      setIsSavingTask(false);
+      setClickedDateModalOpen(false);
+    }
+
+    const newTask: TaskType = {
+      id: dbTaskId,
+      title: clickedTaskTitle,
+      project: clickedTaskProject,
+      status: clickedTaskStatus,
+      countdownSeconds,
+      difficulty: 5,
+      impact: clickedTaskStatus === 'critical' ? 8 : clickedTaskStatus === 'normal' ? 6 : 4,
+      postponedCount: 0,
+      subtasks: defaultSubtasks.map(text => ({ text, completed: false })),
+      createdAt: new Date().toISOString()
+    };
+
+    setTasks(prev => [newTask, ...prev]);
+  };
+
   // Select the focus task: either the active session task, or the highest priority task (first sorted item)
   const focusTask = tasks.find(t => t.id === activeSessionTaskId) || tasks[0];
 
@@ -424,7 +536,8 @@ export default function DashboardView({
                 return (
                   <div
                     key={day.toISOString()}
-                    className={`min-h-[75px] p-1.5 border rounded-lg flex flex-col justify-between transition-all hover:bg-surface-container-high/30 select-none ${isToday
+                    onClick={() => handleDayClick(day)}
+                    className={`min-h-[75px] p-1.5 border rounded-lg flex flex-col justify-between transition-all hover:bg-surface-container-high/30 select-none cursor-pointer ${isToday
                       ? 'border-primary bg-primary/5 ring-1 ring-primary/20 shadow-lg'
                       : 'border-outline/10 bg-surface-container-low/10'
                       }`}
@@ -583,6 +696,104 @@ export default function DashboardView({
             })}
           </div>
         </div>
+        {/* Create Task Modal for Clicked Date */}
+        {clickedDateModalOpen && clickedDate && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="w-full max-w-md glass-panel rounded-2xl overflow-hidden border border-outline/30 bg-surface-container-low/95 p-6 space-y-6 shadow-2xl scale-100 animate-in zoom-in-95 duration-200">
+              <div className="flex justify-between items-center border-b border-outline/20 pb-3">
+                <div className="space-y-1">
+                  <h3 className="font-sans font-bold text-sm text-white">Create Target Deadline</h3>
+                  <p className="font-mono text-[9px] text-primary font-bold uppercase tracking-wider">
+                    For {clickedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setClickedDateModalOpen(false)}
+                  className="text-on-surface-variant hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleClickedDateSubmit} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="font-mono text-[9px] text-on-surface-variant uppercase block font-bold">
+                    Task Title
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Write Database Seed Script"
+                    className="w-full bg-surface-container border border-outline rounded-lg px-3 py-2 text-xs text-white placeholder:text-on-surface-variant/40 focus:ring-1 focus:ring-primary focus:border-primary outline-none font-sans"
+                    value={clickedTaskTitle}
+                    onChange={(e) => setClickedTaskTitle(e.target.value)}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="font-mono text-[9px] text-on-surface-variant uppercase block font-bold">
+                      Project
+                    </label>
+                    <select
+                      className="w-full bg-surface-container border border-outline rounded-lg px-3 py-2 text-xs text-white focus:ring-1 focus:ring-primary outline-none"
+                      value={clickedTaskProject}
+                      onChange={(e) => setClickedTaskProject(e.target.value)}
+                    >
+                      <option value="Nexus Core">Nexus Core</option>
+                      <option value="Internal Operations">Internal Operations</option>
+                      <option value="Vision 2025">Vision 2025</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="font-mono text-[9px] text-on-surface-variant uppercase block font-bold">
+                      Priority Status
+                    </label>
+                    <select
+                      className="w-full bg-surface-container border border-outline rounded-lg px-3 py-2 text-xs text-white focus:ring-1 focus:ring-primary outline-none"
+                      value={clickedTaskStatus}
+                      onChange={(e) =>
+                        setClickedTaskStatus(e.target.value as 'critical' | 'normal' | 'deferred')
+                      }
+                    >
+                      <option value="critical">Critical</option>
+                      <option value="normal">Normal</option>
+                      <option value="deferred">Deferred</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <span className="font-mono text-[8px] text-on-surface-variant/60 block uppercase tracking-wider">
+                    Google Calendar &amp; DB Connection
+                  </span>
+                  <p className="text-[10px] text-on-surface-variant leading-normal mt-0.5">
+                    This task will automatically save to Supabase and schedule an event on your Google Calendar.
+                  </p>
+                </div>
+
+                <div className="pt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setClickedDateModalOpen(false)}
+                    className="flex-1 py-2.5 border border-outline rounded-lg text-xs text-on-surface font-semibold hover:bg-surface-container transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingTask}
+                    className="flex-1 py-2.5 bg-primary text-on-primary font-sans font-bold text-xs rounded-lg hover:brightness-110 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    {isSavingTask ? 'Saving...' : 'Create Target'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

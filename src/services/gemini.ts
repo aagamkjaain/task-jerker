@@ -56,6 +56,16 @@ export interface GeneratedPlan {
   estimated_hours: number;
   difficulty: number; // 1 to 10
   impact: number; // 1 to 10
+  hasDeadline: boolean;
+  deadlineDate?: string;
+  deadlineHours?: number;
+  takesMoreThanOneDay: boolean;
+  timelinePhases: {
+    phaseName: string;
+    title: string;
+    description: string;
+    status: 'current' | 'upcoming' | 'locked';
+  }[];
 }
 
 export interface TriagePlan {
@@ -72,7 +82,7 @@ export interface TrimmedScopePlan {
 /**
  * Generate a structured plan for a user's goal.
  */
-export async function generateTaskPlan(prompt: string): Promise<GeneratedPlan> {
+export async function generateTaskPlan(prompt: string, currentDateStr: string = new Date().toISOString()): Promise<GeneratedPlan> {
   const client = getGeminiClient();
   if (!client) {
     throw new Error('Gemini API Key is missing. Please set it in Settings.');
@@ -80,9 +90,30 @@ export async function generateTaskPlan(prompt: string): Promise<GeneratedPlan> {
 
   const response = await client.models.generateContent({
     model: 'gemini-2.5-flash',
-    contents: `Please break down the following goal/task into a structured plan: "${prompt}"`,
+    contents: `Please break down the following goal/task into a structured plan: "${prompt}".
+The current date and time is: ${currentDateStr}.`,
     config: {
-      systemInstruction: 'You are DeadlineOS AI Task Brain. Decompose the goal into subtasks (3 to 6 tasks), estimate the effort required in hours, estimate the difficulty (1 to 10), and estimate the impact (1 to 10). Output ONLY valid JSON matching the specified schema.',
+      systemInstruction: `You are DeadlineOS AI Task Brain.
+Decompose the goal into subtasks (3 to 6 tasks), estimate the effort required in hours, estimate the difficulty (1 to 10), and estimate the impact (1 to 10).
+
+Identify if a date, deadline, or duration constraint is mentioned in the user's prompt (e.g. "by Friday", "in 3 days", "on June 28th", "deadline is 2026-06-27").
+If a date or deadline is mentioned:
+1. Set "hasDeadline" to true.
+2. Parse the target date and set "deadlineDate" (format: YYYY-MM-DD).
+3. Calculate the number of hours from the current time (${currentDateStr}) to the target deadline date, and set "deadlineHours".
+4. Determine if the task is complex or if the duration to the deadline spans more than one day. Set "takesMoreThanOneDay" to true or false.
+5. Plan the subtasks accordingly. If "takesMoreThanOneDay" is true, distribute the subtasks across multiple days in "timelinePhases".
+   For "timelinePhases", generate a list of phases. Each phase represents a group of subtasks/milestones for a day or phase (e.g., "Day 1: Initial Setup", "Day 2: Implementation", etc.). Each phase must have:
+   - "phaseName" (e.g. "Day 1", "Day 2", etc.)
+   - "title" (a summary of the day's/phase's focus)
+   - "description" (a detailed description of what should be done)
+   - "status" (set the first phase to "current", and subsequent phases to "upcoming" or "locked")
+If no deadline is mentioned:
+1. Set "hasDeadline" to false.
+2. Set "takesMoreThanOneDay" based on whether estimated_hours > 8 or if the task is complex.
+3. Generate standard timeline phases (e.g., "Phase 1: Research", "Phase 2: Development", "Phase 3: Testing").
+
+Output ONLY valid JSON matching the specified schema.`,
       responseMimeType: 'application/json',
       responseSchema: {
         type: 'OBJECT',
@@ -95,9 +126,26 @@ export async function generateTaskPlan(prompt: string): Promise<GeneratedPlan> {
           },
           estimated_hours: { type: 'INTEGER', description: 'Total estimated hours to complete' },
           difficulty: { type: 'INTEGER', description: 'Difficulty rating from 1 (easy) to 10 (hard)' },
-          impact: { type: 'INTEGER', description: 'Impact rating from 1 (low) to 10 (critical)' }
+          impact: { type: 'INTEGER', description: 'Impact rating from 1 (low) to 10 (critical)' },
+          hasDeadline: { type: 'BOOLEAN', description: 'Whether a deadline is mentioned' },
+          deadlineDate: { type: 'STRING', description: 'The deadline date in YYYY-MM-DD format if mentioned' },
+          deadlineHours: { type: 'INTEGER', description: 'Hours from current time to the deadline' },
+          takesMoreThanOneDay: { type: 'BOOLEAN', description: 'Whether the task spans more than one day' },
+          timelinePhases: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                phaseName: { type: 'STRING', description: 'e.g. Day 1, Day 2, Phase 1' },
+                title: { type: 'STRING', description: 'Short title of the phase' },
+                description: { type: 'STRING', description: 'Description of what to do in this phase' },
+                status: { type: 'STRING', enum: ['current', 'upcoming', 'locked'] }
+              },
+              required: ['phaseName', 'title', 'description', 'status']
+            }
+          }
         },
-        required: ['goal', 'subtasks', 'estimated_hours', 'difficulty', 'impact']
+        required: ['goal', 'subtasks', 'estimated_hours', 'difficulty', 'impact', 'hasDeadline', 'takesMoreThanOneDay', 'timelinePhases']
       }
     }
   });

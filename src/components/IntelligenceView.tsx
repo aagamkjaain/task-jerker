@@ -34,6 +34,7 @@ export default function IntelligenceView({
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState(false);
+  const [syncToGoogleCalendar, setSyncToGoogleCalendar] = useState(true);
   
   // Voice Assistant States
   const [isListening, setIsListening] = useState(false);
@@ -52,7 +53,7 @@ export default function IntelligenceView({
         setIsGenerating(true);
         setErrorMessage(null);
         try {
-          const plan = await generateTaskPlan(initialPrompt);
+          const plan = await generateTaskPlan(initialPrompt, new Date().toISOString());
           setGeneratedPlan(plan);
         } catch (err: any) {
           setErrorMessage(err.message || 'An error occurred while generating the plan.');
@@ -124,7 +125,7 @@ export default function IntelligenceView({
             setIsGenerating(true);
             setErrorMessage(null);
             try {
-              const plan = await generateTaskPlan(speechToText);
+              const plan = await generateTaskPlan(speechToText, new Date().toISOString());
               setGeneratedPlan(plan);
               
               // Speak feedback back to user using Gemini TTS
@@ -173,7 +174,7 @@ export default function IntelligenceView({
     setIsGenerating(true);
     setErrorMessage(null);
     try {
-      const plan = await generateTaskPlan(inputValue);
+      const plan = await generateTaskPlan(inputValue, new Date().toISOString());
       setGeneratedPlan(plan);
     } catch (err: any) {
       setErrorMessage(err.message || 'An error occurred while generating the plan.');
@@ -188,7 +189,7 @@ export default function IntelligenceView({
     setIsGenerating(true);
     setErrorMessage(null);
     try {
-      const plan = await generateTaskPlan(command);
+      const plan = await generateTaskPlan(command, new Date().toISOString());
       setGeneratedPlan(plan);
     } catch (err: any) {
       setErrorMessage(err.message || 'An error occurred while generating the plan.');
@@ -211,6 +212,9 @@ export default function IntelligenceView({
     if (!generatedPlan) return;
     
     let dbTaskId = `t_${Date.now()}`;
+    const countdownSeconds = (generatedPlan.hasDeadline && generatedPlan.deadlineHours !== undefined)
+      ? generatedPlan.deadlineHours * 3600
+      : generatedPlan.estimated_hours * 3600;
     
     try {
       const { createGoal, isSupabaseConfigured, supabase } = await import('../services/supabase');
@@ -225,14 +229,24 @@ export default function IntelligenceView({
             generatedPlan.estimated_hours,
             generatedPlan.difficulty,
             generatedPlan.impact,
-            generatedPlan.subtasks
+            generatedPlan.subtasks,
+            countdownSeconds
           );
           dbTaskId = dbTask.id;
 
-          // 2. Schedule Event via Google Calendar API if Google Auth token is active
-          if (session.provider_token) {
-            const startDateTime = new Date().toISOString();
-            const endDateTime = new Date(Date.now() + generatedPlan.estimated_hours * 3600 * 1000).toISOString();
+          // 2. Schedule Event via Google Calendar API if Google Auth token is active and permitted
+          const isPermitted = !generatedPlan.hasDeadline || syncToGoogleCalendar;
+          if (session.provider_token && isPermitted) {
+            let startDateTime = new Date().toISOString();
+            let endDateTime = new Date(Date.now() + generatedPlan.estimated_hours * 3600 * 1000).toISOString();
+
+            if (generatedPlan.hasDeadline && generatedPlan.deadlineDate) {
+              const deadlineDateObj = new Date(generatedPlan.deadlineDate + 'T09:00:00');
+              if (!isNaN(deadlineDateObj.getTime())) {
+                startDateTime = deadlineDateObj.toISOString();
+                endDateTime = new Date(deadlineDateObj.getTime() + 2 * 3600 * 1000).toISOString();
+              }
+            }
             
             try {
               const res = await fetch(
@@ -273,7 +287,7 @@ export default function IntelligenceView({
       title: generatedPlan.goal,
       project: 'AI Architect',
       status: generatedPlan.impact >= 8 ? 'critical' : 'normal',
-      countdownSeconds: generatedPlan.estimated_hours * 3600,
+      countdownSeconds: countdownSeconds,
       difficulty: generatedPlan.difficulty,
       impact: generatedPlan.impact,
       postponedCount: 0,
@@ -293,6 +307,15 @@ export default function IntelligenceView({
   // Generate timeline phases based on generated plan subtasks
   const getTimelineItems = (): TimelineItem[] => {
     if (!generatedPlan) return [];
+    if (generatedPlan.timelinePhases && generatedPlan.timelinePhases.length > 0) {
+      return generatedPlan.timelinePhases.map((phase, idx) => ({
+        id: `timeline-${idx}`,
+        week: phase.phaseName,
+        title: phase.title,
+        description: phase.description,
+        status: phase.status
+      }));
+    }
     const count = generatedPlan.subtasks.length;
     return [
       {
@@ -503,6 +526,24 @@ export default function IntelligenceView({
                 </div>
 
                 <div className="pt-4 border-t border-outline/20 space-y-4">
+                  {generatedPlan.hasDeadline && (
+                    <div className="p-3 bg-secondary/10 border border-secondary/30 rounded-lg text-left space-y-2">
+                      <span className="font-mono text-[8px] text-secondary font-bold uppercase tracking-wider block">Google Calendar Permission</span>
+                      <p className="text-[10px] text-on-surface-variant leading-normal">
+                        A deadline was detected in your request ({generatedPlan.deadlineDate}). Do you permit DeadlineOS to sync this task to your Google Calendar?
+                      </p>
+                      <label className="flex items-center gap-2 cursor-pointer mt-1 select-none">
+                        <input
+                          type="checkbox"
+                          checked={syncToGoogleCalendar}
+                          onChange={(e) => setSyncToGoogleCalendar(e.target.checked)}
+                          className="rounded border-outline bg-surface-container text-primary focus:ring-primary w-3.5 h-3.5 cursor-pointer"
+                        />
+                        <span className="text-[10px] text-white font-medium">Permit Google Calendar Sync</span>
+                      </label>
+                    </div>
+                  )}
+
                   <div className="p-3 bg-primary/10 border border-primary/30 rounded-lg text-left">
                     <span className="font-mono text-[8px] text-primary font-bold uppercase tracking-wider block mb-1">Approval Required</span>
                     <p className="text-[10px] text-on-surface-variant leading-normal">

@@ -131,7 +131,8 @@ export async function createGoal(
   estimatedHours: number,
   difficulty: number,
   impact: number,
-  subtasks: string[]
+  subtasks: string[],
+  customCountdownSeconds?: number
 ): Promise<DbTask> {
   const taskSubtasks = subtasks.map(text => ({ text, completed: false }));
   
@@ -142,7 +143,7 @@ export async function createGoal(
       title,
       project: project || 'Default Project',
       status: impact >= 8 ? 'critical' : 'normal',
-      countdown_seconds: estimatedHours * 3600,
+      countdown_seconds: customCountdownSeconds !== undefined ? customCountdownSeconds : estimatedHours * 3600,
       difficulty,
       impact,
       postponed_count: 0,
