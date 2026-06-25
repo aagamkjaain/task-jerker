@@ -36,6 +36,44 @@ export function saveApiKey(key: string) {
   }
 }
 
+export function getAiProvider(): 'gemini' | 'ollama' {
+  if (typeof process !== 'undefined' && process.env?.AI_PROVIDER) {
+    return (process.env.AI_PROVIDER as any) === 'ollama' ? 'ollama' : 'gemini';
+  }
+  if (typeof localStorage !== 'undefined') {
+    return (localStorage.getItem('AI_PROVIDER') as any) || 'gemini';
+  }
+  return 'gemini';
+}
+
+export function getOllamaUrl(): string {
+  if (typeof process !== 'undefined' && process.env?.OLLAMA_URL) {
+    return process.env.OLLAMA_URL;
+  }
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem('OLLAMA_URL') || 'http://localhost:11434';
+  }
+  return 'http://localhost:11434';
+}
+
+export function getOllamaModel(): string {
+  if (typeof process !== 'undefined' && process.env?.OLLAMA_MODEL) {
+    return process.env.OLLAMA_MODEL;
+  }
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem('OLLAMA_MODEL') || 'llama3';
+  }
+  return 'llama3';
+}
+
+export function saveOllamaConfigs(provider: 'gemini' | 'ollama', url: string, model: string) {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('AI_PROVIDER', provider);
+    localStorage.setItem('OLLAMA_URL', url);
+    localStorage.setItem('OLLAMA_MODEL', model);
+  }
+}
+
 let cachedKey = '';
 let cachedClient: GoogleGenAI | null = null;
 
@@ -80,9 +118,89 @@ export interface TrimmedScopePlan {
 }
 
 /**
+ * Helper to clean Markdown wrapper JSON block code elements from local LLMs.
+ */
+function cleanAndParseJson(content: string): any {
+  let cleanJson = content.trim();
+  if (cleanJson.startsWith('```')) {
+    cleanJson = cleanJson.replace(/^```json\s*/i, '').replace(/```$/, '').trim();
+  }
+  return JSON.parse(cleanJson);
+}
+
+/**
  * Generate a structured plan for a user's goal.
  */
 export async function generateTaskPlan(prompt: string, currentDateStr: string = new Date().toISOString()): Promise<GeneratedPlan> {
+  if (getAiProvider() === 'ollama') {
+    const url = getOllamaUrl();
+    const model = getOllamaModel();
+    const systemInstruction = `You are DeadlineOS AI Task Brain.
+Decompose the goal into subtasks (3 to 6 tasks), estimate the effort required in hours, estimate the difficulty (1 to 10), and estimate the impact (1 to 10).
+
+Identify if a date, deadline, or duration constraint is mentioned in the user's prompt (e.g. "by Friday", "in 3 days", "on June 28th", "deadline is 2026-06-27").
+If a date or deadline is mentioned:
+1. Set "hasDeadline" to true.
+2. Parse the target date and set "deadlineDate" (format: YYYY-MM-DD).
+3. Calculate the number of hours from the current time (${currentDateStr}) to the target deadline date, and set "deadlineHours".
+4. Determine if the task is complex or if the duration to the deadline spans more than one day. Set "takesMoreThanOneDay" to true or false.
+5. Plan the subtasks accordingly. If "takesMoreThanOneDay" is true, distribute the subtasks across multiple days in "timelinePhases".
+   For "timelinePhases", generate a list of phases. Each phase represents a group of subtasks/milestones for a day or phase (e.g., "Day 1: Initial Setup", "Day 2: Implementation", etc.). Each phase must have:
+   - "phaseName" (e.g. "Day 1", "Day 2", etc.)
+   - "title" (a summary of the day's/phase's focus)
+   - "description" (a detailed description of what should be done)
+   - "status" (set the first phase to "current", and subsequent phases to "upcoming" or "locked")
+If no deadline is mentioned:
+1. Set "hasDeadline" to false.
+2. Set "takesMoreThanOneDay" based on whether estimated_hours > 8 or if the task is complex.
+3. Generate standard timeline phases (e.g., "Phase 1: Research", "Phase 2: Development", "Phase 3: Testing").
+
+Output ONLY valid JSON matching this schema:
+{
+  "goal": "A short capitalized title for the goal",
+  "subtasks": ["subtask1", "subtask2", ...],
+  "estimated_hours": number,
+  "difficulty": number,
+  "impact": number,
+  "hasDeadline": boolean,
+  "deadlineDate": "YYYY-MM-DD or empty string",
+  "deadlineHours": number,
+  "takesMoreThanOneDay": boolean,
+  "timelinePhases": [
+    {
+      "phaseName": "Day 1",
+      "title": "title",
+      "description": "desc",
+      "status": "current"
+    }
+  ]
+}`;
+
+    const res = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: `Please break down the following goal/task into a structured plan: "${prompt}". The current date and time is: ${currentDateStr}.` }
+        ],
+        stream: false,
+        format: 'json'
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error(`Ollama request failed: ${res.statusText}`);
+    }
+
+    const data = await res.json();
+    const content = data.message?.content || '';
+    return cleanAndParseJson(content) as GeneratedPlan;
+  }
+
   const client = getGeminiClient();
   if (!client) {
     throw new Error('Gemini API Key is missing. Please set it in Settings.');
@@ -165,6 +283,29 @@ export async function generatePanicTriage(
   subtasks: string[],
   hoursLeft: number
 ): Promise<TriagePlan> {
+  if (getAiProvider() === 'ollama') {
+    const url = getOllamaUrl();
+    const model = getOllamaModel();
+    const res = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: 'You are the DeadlineOS Panic Mode Agent. Triage the given subtasks into "must_do" (essential for MVP/survival/deployment) and "skip" (nice-to-have, documentation, cleanups, styles) based on the remaining hours constraint. Output ONLY valid JSON matching this schema:\n{\n  "must_do": ["task1", "task2"],\n  "skip": ["task3"],\n  "justification": "reason"\n}' },
+          { role: 'user', content: `Goal/Task: "${taskTitle}"\nSubtasks: ${JSON.stringify(subtasks)}\nTime Remaining: ${hoursLeft} hours` }
+        ],
+        stream: false,
+        format: 'json'
+      })
+    });
+    if (!res.ok) throw new Error(`Ollama request failed: ${res.statusText}`);
+    const data = await res.json();
+    return cleanAndParseJson(data.message?.content || '{}') as TriagePlan;
+  }
+
   const client = getGeminiClient();
   if (!client) {
     throw new Error('Gemini API Key is missing. Please set it in Settings.');
@@ -213,6 +354,29 @@ export async function generateScopeReduction(
   taskTitle: string,
   subtasks: string[]
 ): Promise<TrimmedScopePlan> {
+  if (getAiProvider() === 'ollama') {
+    const url = getOllamaUrl();
+    const model = getOllamaModel();
+    const res = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: 'You are the DeadlineOS Anti-Procrastination Coach. Trim the scope of the subtasks by roughly 30% to salvage a slipping deadline, keeping only the bare minimum core value. Output ONLY valid JSON matching this schema:\n{\n  "subtasks": ["trimmed_task1"],\n  "justification": "reason"\n}' },
+          { role: 'user', content: `Task: "${taskTitle}"\nCurrent Subtasks: ${JSON.stringify(subtasks)}` }
+        ],
+        stream: false,
+        format: 'json'
+      })
+    });
+    if (!res.ok) throw new Error(`Ollama request failed: ${res.statusText}`);
+    const data = await res.json();
+    return cleanAndParseJson(data.message?.content || '{}') as TrimmedScopePlan;
+  }
+
   const client = getGeminiClient();
   if (!client) {
     throw new Error('Gemini API Key is missing. Please set it in Settings.');
@@ -222,7 +386,7 @@ export async function generateScopeReduction(
     model: 'gemini-2.5-flash',
     contents: `Task: "${taskTitle}"\nCurrent Subtasks: ${JSON.stringify(subtasks)}`,
     config: {
-      systemInstruction: 'You are the DeadlineOS Anti-Procrastination Coach. Trim the scope of the subtasks by roughly 30% to salvage a slipping deadline, keeping only the bare minimum core value. Output ONLY valid JSON matching the specified schema.',
+      systemInstruction: 'You are the DeadlineOS Anti-Procrastination Coach. Trim the scope of the subtasks by roughly 30% to salvage a slipping deadline, keeping only the bare minimum core value. Output ONLY valid JSON matching this schema.',
       responseMimeType: 'application/json',
       responseSchema: {
         type: 'OBJECT',
@@ -253,6 +417,28 @@ export async function generateScopeReduction(
  * Voice Assistant helper for talking to user.
  */
 export async function getVoicePlanningResponse(userSpeechInput: string): Promise<string> {
+  if (getAiProvider() === 'ollama') {
+    const url = getOllamaUrl();
+    const model = getOllamaModel();
+    const res = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: 'You are the voice assistant for DeadlineOS, a distraction-free productivity dashboard. Respond to the user request in a single, short, concise, highly motivating sentence (maximum 25 words). Keep it verbal and spoken-friendly.' },
+          { role: 'user', content: userSpeechInput }
+        ],
+        stream: false
+      })
+    });
+    if (!res.ok) throw new Error(`Ollama request failed: ${res.statusText}`);
+    const data = await res.json();
+    return data.message?.content || 'Understood, let us keep pushing toward the deadline.';
+  }
+
   const client = getGeminiClient();
   if (!client) {
     return 'Please set your Gemini API key in settings first.';
@@ -285,6 +471,10 @@ export interface ParsedVoiceCommand {
  * Transcribe raw base64 audio data using Gemini multimodal capabilities.
  */
 export async function transcribeAudio(base64Data: string, mimeType: string): Promise<string> {
+  if (getAiProvider() === 'ollama') {
+    throw new Error('Ollama does not support audio transcription natively. Fallback to Web Speech API.');
+  }
+
   const client = getGeminiClient();
   if (!client) {
     throw new Error('Gemini API Key is missing. Please set it in Settings.');
@@ -312,6 +502,10 @@ export async function transcribeAudio(base64Data: string, mimeType: string): Pro
  * Convert text into speech using Gemini TTS responseModalities: ["AUDIO"].
  */
 export async function generateSpeech(text: string): Promise<{ base64Data: string; mimeType: string }> {
+  if (getAiProvider() === 'ollama') {
+    throw new Error('Ollama does not support TTS natively. Fallback to Web Speech API.');
+  }
+
   const client = getGeminiClient();
   if (!client) {
     throw new Error('Gemini API Key is missing. Please set it in Settings.');
@@ -348,6 +542,53 @@ export async function generateSpeech(text: string): Promise<{ base64Data: string
  * Parse a user spoken command into structured actions.
  */
 export async function parseVoiceCommand(commandText: string, currentTasks: any[]): Promise<ParsedVoiceCommand> {
+  if (getAiProvider() === 'ollama') {
+    const url = getOllamaUrl();
+    const model = getOllamaModel();
+    const res = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: `You are the voice control processor for DeadlineOS.
+Analyze the user's spoken command and determine the appropriate action.
+You must classify the command into one of the following actions:
+1. CREATE_TASK: User wants to add a new task, goal, or deadline. Look for titles and durations (e.g. "due in 5 hours", "estimated 3 hours"). Default duration is 3 hours. Status can be "critical" (if high priority or urgent), "deferred", or "normal".
+2. NAVIGATE: User wants to change screens. Map their request to a valid screen: "dashboard", "intelligence", "architect", "focus", "analytics", "habits", "settings".
+3. INTELLIGENCE_PLAN: User wants to generate a complete multi-step plan for a complex goal (e.g. "plan my compiler project"). Set planPrompt to the goal.
+4. GENERAL_CHAT: User is asking a question, greeting, or wants motivational advice (e.g. "what are my deadlines?", "tell me a joke", "how am I doing?").
+
+For all actions, generate a friendly, concise 'spokenResponse' (maximum 20 words) that the system will speak back to the user.
+Output ONLY a valid JSON object matching this schema:
+{
+  "action": "CREATE_TASK" | "NAVIGATE" | "INTELLIGENCE_PLAN" | "GENERAL_CHAT",
+  "taskDetails": { "title": "string", "hours": number, "status": "critical" | "normal" | "deferred" } | null,
+  "screen": "dashboard" | "intelligence" | "architect" | "focus" | "analytics" | "habits" | "settings" | null,
+  "planPrompt": "string" | null,
+  "spokenResponse": "string"
+}` },
+          { role: 'user', content: `User command: "${commandText}"\nCurrent tasks in system: ${JSON.stringify(currentTasks.map(t => ({ id: t.id, title: t.title, status: t.status })))}` }
+        ],
+        stream: false,
+        format: 'json'
+      })
+    });
+    if (!res.ok) throw new Error(`Ollama request failed: ${res.statusText}`);
+    const data = await res.json();
+    const content = data.message?.content || '{}';
+    const parsed = cleanAndParseJson(content);
+    return {
+      action: parsed.action || 'GENERAL_CHAT',
+      taskDetails: parsed.taskDetails || null,
+      screen: parsed.screen || null,
+      planPrompt: parsed.planPrompt || null,
+      spokenResponse: parsed.spokenResponse || 'Understood, processing completed.'
+    };
+  }
+
   const client = getGeminiClient();
   if (!client) {
     throw new Error('Gemini API Key is missing. Please set it in Settings.');
@@ -404,4 +645,3 @@ export function playAudio(base64Data: string, mimeType: string): Promise<void> {
     }
   });
 }
-

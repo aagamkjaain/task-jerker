@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, X, RefreshCw, Volume2, CheckCircle2, Navigation, FileText, AlertTriangle } from 'lucide-react';
 import { TaskType } from '../types';
-import { transcribeAudio, parseVoiceCommand, generateSpeech, playAudio } from '../services/gemini';
+import { transcribeAudio, parseVoiceCommand, generateSpeech, playAudio, getAiProvider } from '../services/gemini';
 
 interface VoiceCommandPanelProps {
   isOpen: boolean;
@@ -29,6 +29,7 @@ export default function VoiceCommandPanel({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<any>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -56,6 +57,10 @@ export default function VoiceCommandPanel({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
@@ -69,6 +74,83 @@ export default function VoiceCommandPanel({
       setVoiceFeedback('');
       setParsedCommand(null);
       setTimer(0);
+
+      const isOllama = getAiProvider() === 'ollama';
+
+      if (isOllama) {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          setStatus('error');
+          setVoiceFeedback('Browser-native speech recognition is not supported in this browser. Please use Chrome/Edge/Safari.');
+          return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'en-US';
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.onstart = () => {
+          setStatus('listening');
+        };
+
+        recognition.onresult = async (event: any) => {
+          const text = event.results[0][0].transcript;
+          if (!text) {
+            setStatus('error');
+            setVoiceFeedback('No voice command detected. Please speak clearly.');
+            return;
+          }
+
+          setTranscription(text);
+          setStatus('processing');
+          try {
+            const parsed = await parseVoiceCommand(text, tasks);
+            setParsedCommand(parsed);
+            setVoiceFeedback(parsed.spokenResponse);
+
+            // Execute Actions
+            if (parsed.action === 'CREATE_TASK' && parsed.taskDetails) {
+              onCreateTask(parsed.taskDetails.title, parsed.taskDetails.hours, parsed.taskDetails.status);
+            } else if (parsed.action === 'NAVIGATE' && parsed.screen) {
+              onNavigate(parsed.screen);
+            } else if (parsed.action === 'INTELLIGENCE_PLAN' && parsed.planPrompt) {
+              onPlanGoal(parsed.planPrompt);
+            }
+
+            // Local Speech synthesis playback
+            setStatus('speaking');
+            try {
+              const utterance = new SpeechSynthesisUtterance(parsed.spokenResponse);
+              utterance.onend = () => {
+                setStatus('completed');
+              };
+              window.speechSynthesis.speak(utterance);
+            } catch (ttsErr) {
+              console.error('Local TTS error:', ttsErr);
+              setStatus('completed');
+            }
+          } catch (err: any) {
+            console.error(err);
+            setStatus('error');
+            setVoiceFeedback('Command processing failed: ' + (err.message || err));
+          }
+        };
+
+        recognition.onerror = (err: any) => {
+          console.error('Speech recognition error:', err);
+          setStatus('error');
+          setVoiceFeedback('Speech error: ' + err.error);
+        };
+
+        recognition.onend = () => {
+          setStatus(prev => (prev === 'listening' ? 'idle' : prev));
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+        return;
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
@@ -155,6 +237,11 @@ export default function VoiceCommandPanel({
   };
 
   const stopRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+      return;
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }

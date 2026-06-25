@@ -69,7 +69,73 @@ export default function IntelligenceView({
   const audioChunksRef = React.useRef<Blob[]>([]);
 
   // Trigger speech recognition via Gemini (Feature 6)
+  // Trigger speech recognition via local Web Speech API (if Ollama) or Gemini (Feature 6)
   const handleVoiceInput = async () => {
+    const { getAiProvider } = await import('../services/gemini');
+    const isOllama = getAiProvider() === 'ollama';
+
+    if (isOllama) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        setVoiceFeedback('Local Speech Recognition is not supported by your browser. Please try Chrome, Edge, or Safari.');
+        return;
+      }
+
+      if (isListening) {
+        setIsListening(false);
+        return;
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setVoiceFeedback('Listening locally...');
+      };
+
+      recognition.onresult = async (event: any) => {
+        const speechToText = event.results[0][0].transcript;
+        if (!speechToText) {
+          setVoiceFeedback('No speech detected. Please try again.');
+          return;
+        }
+
+        setInputValue(speechToText);
+        setVoiceFeedback(`Processing: "${speechToText}"...`);
+        
+        setIsGenerating(true);
+        setErrorMessage(null);
+        try {
+          const plan = await generateTaskPlan(speechToText, new Date().toISOString());
+          setGeneratedPlan(plan);
+          
+          const spokenResponse = `Planned goal: ${plan.goal}`;
+          setVoiceFeedback(spokenResponse);
+          speakResponseText(spokenResponse);
+        } catch (err: any) {
+          setErrorMessage(err.message || 'Error occurred during voice task generation.');
+        } finally {
+          setIsGenerating(false);
+        }
+      };
+
+      recognition.onerror = (err: any) => {
+        console.error('Speech recognition error:', err);
+        setVoiceFeedback('Speech error: ' + err.error);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognition.start();
+      return;
+    }
+
     if (isListening) {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
@@ -158,11 +224,16 @@ export default function IntelligenceView({
 
   const speakResponseText = async (text: string) => {
     try {
-      const { generateSpeech, playAudio } = await import('../services/gemini');
-      const audio = await generateSpeech(text);
-      await playAudio(audio.base64Data, audio.mimeType);
+      const { generateSpeech, playAudio, getAiProvider } = await import('../services/gemini');
+      if (getAiProvider() === 'ollama') {
+        const utterance = new SpeechSynthesisUtterance(text);
+        window.speechSynthesis.speak(utterance);
+      } else {
+        const audio = await generateSpeech(text);
+        await playAudio(audio.base64Data, audio.mimeType);
+      }
     } catch (err) {
-      console.error('Gemini TTS playback failed:', err);
+      console.error('TTS playback failed:', err);
     }
   };
 
@@ -211,96 +282,119 @@ export default function IntelligenceView({
   const handleCommitToCalendar = async () => {
     if (!generatedPlan) return;
     
-    let dbTaskId = `t_${Date.now()}`;
-    const countdownSeconds = (generatedPlan.hasDeadline && generatedPlan.deadlineHours !== undefined)
+    const subtasksCount = generatedPlan.subtasks.length;
+    const subtaskHours = Math.max(1, Math.round(generatedPlan.estimated_hours / subtasksCount));
+    const totalCountdownSeconds = (generatedPlan.hasDeadline && generatedPlan.deadlineHours !== undefined)
       ? generatedPlan.deadlineHours * 3600
       : generatedPlan.estimated_hours * 3600;
-    
+    const subtaskCountdown = Math.max(3600, Math.round(totalCountdownSeconds / subtasksCount));
+
+    const createdTasks: TaskType[] = [];
+
     try {
       const { createGoal, isSupabaseConfigured, supabase } = await import('../services/supabase');
-      if (isSupabaseConfigured()) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session && session.user) {
-          // 1. Create task in Supabase
-          const dbTask = await createGoal(
-            session.user.id,
-            generatedPlan.goal,
-            'AI Architect',
-            generatedPlan.estimated_hours,
-            generatedPlan.difficulty,
-            generatedPlan.impact,
-            generatedPlan.subtasks,
-            countdownSeconds
-          );
-          dbTaskId = dbTask.id;
+      const hasDb = isSupabaseConfigured();
+      let session: any = null;
+      if (hasDb) {
+        const { data } = await supabase.auth.getSession();
+        session = data.session;
+      }
 
-          // 2. Schedule Event via Google Calendar API if Google Auth token is active and permitted
-          const isPermitted = !generatedPlan.hasDeadline || syncToGoogleCalendar;
-          if (session.provider_token && isPermitted) {
-            let startDateTime = new Date().toISOString();
-            let endDateTime = new Date(Date.now() + generatedPlan.estimated_hours * 3600 * 1000).toISOString();
+      for (let i = 0; i < subtasksCount; i++) {
+        const subtaskText = generatedPlan.subtasks[i];
+        let dbTaskId = `st_${Date.now()}_${i}`;
 
-            if (generatedPlan.hasDeadline && generatedPlan.deadlineDate) {
-              const deadlineDateObj = new Date(generatedPlan.deadlineDate + 'T09:00:00');
-              if (!isNaN(deadlineDateObj.getTime())) {
-                startDateTime = deadlineDateObj.toISOString();
-                endDateTime = new Date(deadlineDateObj.getTime() + 2 * 3600 * 1000).toISOString();
-              }
-            }
-            
-            try {
-              const res = await fetch(
-                'https://www.googleapis.com/calendar/v3/calendars/primary/events',
-                {
-                  method: 'POST',
-                  headers: {
-                    Authorization: `Bearer ${session.provider_token}`,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify({
-                    summary: `🎯 DeadlineOS: ${generatedPlan.goal}`,
-                    description: `AI-Generated Subtask Checklist:\n${generatedPlan.subtasks.map((st, i) => `${i + 1}. [ ] ${st}`).join('\n')}`,
-                    start: { dateTime: startDateTime },
-                    end: { dateTime: endDateTime }
-                  })
-                }
-              );
-
-              if (!res.ok) {
-                console.error('Google Calendar event creation failed:', await res.text());
-              } else {
-                console.log('Successfully created Google Calendar event!');
-              }
-            } catch (googleErr) {
-              console.error('Failed to post event to Google Calendar API:', googleErr);
-            }
+        // 1. Create task in Supabase
+        if (hasDb && session && session.user) {
+          try {
+            const dbTask = await createGoal(
+              session.user.id,
+              subtaskText,
+              generatedPlan.goal, // Use the main goal as the project grouping name
+              subtaskHours,
+              generatedPlan.difficulty,
+              generatedPlan.impact,
+              [], // No subtasks for the individual subtask task
+              subtaskCountdown
+            );
+            dbTaskId = dbTask.id;
+          } catch (dbErr) {
+            console.error('Failed to create subtask in Supabase:', dbErr);
           }
         }
+
+        // 2. Schedule Event via Google Calendar API if Google Auth token is active and permitted
+        const isPermitted = !generatedPlan.hasDeadline || syncToGoogleCalendar;
+        if (session && session.provider_token && isPermitted) {
+          let startDateTime = new Date(Date.now() + i * subtaskHours * 3600 * 1000).toISOString();
+          let endDateTime = new Date(Date.now() + (i + 1) * subtaskHours * 3600 * 1000).toISOString();
+
+          if (generatedPlan.hasDeadline && generatedPlan.deadlineDate) {
+            const deadlineDateObj = new Date(generatedPlan.deadlineDate + 'T09:00:00');
+            if (!isNaN(deadlineDateObj.getTime())) {
+              // Distribute sequentially leading up to deadline
+              const totalMs = deadlineDateObj.getTime() - Date.now();
+              const sliceMs = totalMs / subtasksCount;
+              startDateTime = new Date(Date.now() + i * sliceMs).toISOString();
+              endDateTime = new Date(Date.now() + (i + 0.8) * sliceMs).toISOString();
+            }
+          }
+
+          try {
+            const res = await fetch(
+              'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+              {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${session.provider_token}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  summary: `🎯 ${generatedPlan.goal}: ${subtaskText}`,
+                  description: `Subtask of Goal: ${generatedPlan.goal}\nDifficulty: ${generatedPlan.difficulty}/10\nImpact: ${generatedPlan.impact}/10`,
+                  start: { dateTime: startDateTime },
+                  end: { dateTime: endDateTime }
+                })
+              }
+            );
+
+            if (!res.ok) {
+              console.error('Google Calendar event creation failed for subtask:', await res.text());
+            } else {
+              console.log(`Successfully created Google Calendar event for subtask: ${subtaskText}`);
+            }
+          } catch (googleErr) {
+            console.error('Failed to post event to Google Calendar API:', googleErr);
+          }
+        }
+
+        // Create TaskType for local UI priority queue state
+        const newTask: TaskType = {
+          id: dbTaskId,
+          title: subtaskText,
+          project: generatedPlan.goal,
+          status: generatedPlan.impact >= 8 ? 'critical' : 'normal',
+          countdownSeconds: subtaskCountdown,
+          difficulty: generatedPlan.difficulty,
+          impact: generatedPlan.impact,
+          postponedCount: 0,
+          subtasks: [],
+          createdAt: new Date().toISOString()
+        };
+        createdTasks.push(newTask);
       }
     } catch (err) {
-      console.error('Failed to create generated goal in Supabase:', err);
+      console.error('Failed to commit generated plan to DB & Calendar:', err);
     }
 
-    // Add to global tasks list
-    const newTask: TaskType = {
-      id: dbTaskId,
-      title: generatedPlan.goal,
-      project: 'AI Architect',
-      status: generatedPlan.impact >= 8 ? 'critical' : 'normal',
-      countdownSeconds: countdownSeconds,
-      difficulty: generatedPlan.difficulty,
-      impact: generatedPlan.impact,
-      postponedCount: 0,
-      subtasks: generatedPlan.subtasks.map(st => ({ text: st, completed: false })),
-      createdAt: new Date().toISOString()
-    };
-
-    setTasks(prev => [newTask, ...prev]);
+    if (createdTasks.length > 0) {
+      setTasks(prev => [...createdTasks, ...prev]);
+    }
 
     setSuccessToast(true);
     setTimeout(() => {
       setSuccessToast(false);
-      onNavigate('dashboard'); // Redirect to dashboard to see new task
+      onNavigate('dashboard'); // Redirect to dashboard to see new tasks in queue
     }, 2000);
   };
 

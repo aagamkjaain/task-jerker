@@ -35,14 +35,14 @@ async function getUserByPhoneNumber(phoneNumber) {
   }
   return user;
 }
-async function createGoal(userId, title, project, estimatedHours, difficulty, impact, subtasks) {
+async function createGoal(userId, title, project, estimatedHours, difficulty, impact, subtasks, customCountdownSeconds) {
   const taskSubtasks = subtasks.map((text) => ({ text, completed: false }));
   const { data: newTask, error } = await supabase.from("tasks").insert({
     user_id: userId,
     title,
     project: project || "Default Project",
     status: impact >= 8 ? "critical" : "normal",
-    countdown_seconds: estimatedHours * 3600,
+    countdown_seconds: customCountdownSeconds !== void 0 ? customCountdownSeconds : estimatedHours * 3600,
     difficulty,
     impact,
     postponed_count: 0,
@@ -149,6 +149,33 @@ function getApiKey() {
   }
   return "";
 }
+function getAiProvider() {
+  if (typeof process !== "undefined" && process.env?.AI_PROVIDER) {
+    return process.env.AI_PROVIDER === "ollama" ? "ollama" : "gemini";
+  }
+  if (typeof localStorage !== "undefined") {
+    return localStorage.getItem("AI_PROVIDER") || "gemini";
+  }
+  return "gemini";
+}
+function getOllamaUrl() {
+  if (typeof process !== "undefined" && process.env?.OLLAMA_URL) {
+    return process.env.OLLAMA_URL;
+  }
+  if (typeof localStorage !== "undefined") {
+    return localStorage.getItem("OLLAMA_URL") || "http://localhost:11434";
+  }
+  return "http://localhost:11434";
+}
+function getOllamaModel() {
+  if (typeof process !== "undefined" && process.env?.OLLAMA_MODEL) {
+    return process.env.OLLAMA_MODEL;
+  }
+  if (typeof localStorage !== "undefined") {
+    return localStorage.getItem("OLLAMA_MODEL") || "llama3";
+  }
+  return "llama3";
+}
 var cachedKey = "";
 var cachedClient = null;
 function getGeminiClient() {
@@ -160,16 +187,109 @@ function getGeminiClient() {
   }
   return cachedClient;
 }
-async function generateTaskPlan(prompt) {
+function cleanAndParseJson(content) {
+  let cleanJson = content.trim();
+  if (cleanJson.startsWith("```")) {
+    cleanJson = cleanJson.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+  }
+  return JSON.parse(cleanJson);
+}
+async function generateTaskPlan(prompt, currentDateStr = (/* @__PURE__ */ new Date()).toISOString()) {
+  if (getAiProvider() === "ollama") {
+    const url = getOllamaUrl();
+    const model = getOllamaModel();
+    const systemInstruction = `You are DeadlineOS AI Task Brain.
+Decompose the goal into subtasks (3 to 6 tasks), estimate the effort required in hours, estimate the difficulty (1 to 10), and estimate the impact (1 to 10).
+
+Identify if a date, deadline, or duration constraint is mentioned in the user's prompt (e.g. "by Friday", "in 3 days", "on June 28th", "deadline is 2026-06-27").
+If a date or deadline is mentioned:
+1. Set "hasDeadline" to true.
+2. Parse the target date and set "deadlineDate" (format: YYYY-MM-DD).
+3. Calculate the number of hours from the current time (${currentDateStr}) to the target deadline date, and set "deadlineHours".
+4. Determine if the task is complex or if the duration to the deadline spans more than one day. Set "takesMoreThanOneDay" to true or false.
+5. Plan the subtasks accordingly. If "takesMoreThanOneDay" is true, distribute the subtasks across multiple days in "timelinePhases".
+   For "timelinePhases", generate a list of phases. Each phase represents a group of subtasks/milestones for a day or phase (e.g., "Day 1: Initial Setup", "Day 2: Implementation", etc.). Each phase must have:
+   - "phaseName" (e.g. "Day 1", "Day 2", etc.)
+   - "title" (a summary of the day's/phase's focus)
+   - "description" (a detailed description of what should be done)
+   - "status" (set the first phase to "current", and subsequent phases to "upcoming" or "locked")
+If no deadline is mentioned:
+1. Set "hasDeadline" to false.
+2. Set "takesMoreThanOneDay" based on whether estimated_hours > 8 or if the task is complex.
+3. Generate standard timeline phases (e.g., "Phase 1: Research", "Phase 2: Development", "Phase 3: Testing").
+
+Output ONLY valid JSON matching this schema:
+{
+  "goal": "A short capitalized title for the goal",
+  "subtasks": ["subtask1", "subtask2", ...],
+  "estimated_hours": number,
+  "difficulty": number,
+  "impact": number,
+  "hasDeadline": boolean,
+  "deadlineDate": "YYYY-MM-DD or empty string",
+  "deadlineHours": number,
+  "takesMoreThanOneDay": boolean,
+  "timelinePhases": [
+    {
+      "phaseName": "Day 1",
+      "title": "title",
+      "description": "desc",
+      "status": "current"
+    }
+  ]
+}`;
+    const res = await fetch(`${url}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemInstruction },
+          { role: "user", content: `Please break down the following goal/task into a structured plan: "${prompt}". The current date and time is: ${currentDateStr}.` }
+        ],
+        stream: false,
+        format: "json"
+      })
+    });
+    if (!res.ok) {
+      throw new Error(`Ollama request failed: ${res.statusText}`);
+    }
+    const data = await res.json();
+    const content = data.message?.content || "";
+    return cleanAndParseJson(content);
+  }
   const client = getGeminiClient();
   if (!client) {
     throw new Error("Gemini API Key is missing. Please set it in Settings.");
   }
   const response = await client.models.generateContent({
     model: "gemini-2.5-flash",
-    contents: `Please break down the following goal/task into a structured plan: "${prompt}"`,
+    contents: `Please break down the following goal/task into a structured plan: "${prompt}".
+The current date and time is: ${currentDateStr}.`,
     config: {
-      systemInstruction: "You are DeadlineOS AI Task Brain. Decompose the goal into subtasks (3 to 6 tasks), estimate the effort required in hours, estimate the difficulty (1 to 10), and estimate the impact (1 to 10). Output ONLY valid JSON matching the specified schema.",
+      systemInstruction: `You are DeadlineOS AI Task Brain.
+Decompose the goal into subtasks (3 to 6 tasks), estimate the effort required in hours, estimate the difficulty (1 to 10), and estimate the impact (1 to 10).
+
+Identify if a date, deadline, or duration constraint is mentioned in the user's prompt (e.g. "by Friday", "in 3 days", "on June 28th", "deadline is 2026-06-27").
+If a date or deadline is mentioned:
+1. Set "hasDeadline" to true.
+2. Parse the target date and set "deadlineDate" (format: YYYY-MM-DD).
+3. Calculate the number of hours from the current time (${currentDateStr}) to the target deadline date, and set "deadlineHours".
+4. Determine if the task is complex or if the duration to the deadline spans more than one day. Set "takesMoreThanOneDay" to true or false.
+5. Plan the subtasks accordingly. If "takesMoreThanOneDay" is true, distribute the subtasks across multiple days in "timelinePhases".
+   For "timelinePhases", generate a list of phases. Each phase represents a group of subtasks/milestones for a day or phase (e.g., "Day 1: Initial Setup", "Day 2: Implementation", etc.). Each phase must have:
+   - "phaseName" (e.g. "Day 1", "Day 2", etc.)
+   - "title" (a summary of the day's/phase's focus)
+   - "description" (a detailed description of what should be done)
+   - "status" (set the first phase to "current", and subsequent phases to "upcoming" or "locked")
+If no deadline is mentioned:
+1. Set "hasDeadline" to false.
+2. Set "takesMoreThanOneDay" based on whether estimated_hours > 8 or if the task is complex.
+3. Generate standard timeline phases (e.g., "Phase 1: Research", "Phase 2: Development", "Phase 3: Testing").
+
+Output ONLY valid JSON matching the specified schema.`,
       responseMimeType: "application/json",
       responseSchema: {
         type: "OBJECT",
@@ -182,9 +302,26 @@ async function generateTaskPlan(prompt) {
           },
           estimated_hours: { type: "INTEGER", description: "Total estimated hours to complete" },
           difficulty: { type: "INTEGER", description: "Difficulty rating from 1 (easy) to 10 (hard)" },
-          impact: { type: "INTEGER", description: "Impact rating from 1 (low) to 10 (critical)" }
+          impact: { type: "INTEGER", description: "Impact rating from 1 (low) to 10 (critical)" },
+          hasDeadline: { type: "BOOLEAN", description: "Whether a deadline is mentioned" },
+          deadlineDate: { type: "STRING", description: "The deadline date in YYYY-MM-DD format if mentioned" },
+          deadlineHours: { type: "INTEGER", description: "Hours from current time to the deadline" },
+          takesMoreThanOneDay: { type: "BOOLEAN", description: "Whether the task spans more than one day" },
+          timelinePhases: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                phaseName: { type: "STRING", description: "e.g. Day 1, Day 2, Phase 1" },
+                title: { type: "STRING", description: "Short title of the phase" },
+                description: { type: "STRING", description: "Description of what to do in this phase" },
+                status: { type: "STRING", enum: ["current", "upcoming", "locked"] }
+              },
+              required: ["phaseName", "title", "description", "status"]
+            }
+          }
         },
-        required: ["goal", "subtasks", "estimated_hours", "difficulty", "impact"]
+        required: ["goal", "subtasks", "estimated_hours", "difficulty", "impact", "hasDeadline", "takesMoreThanOneDay", "timelinePhases"]
       }
     }
   });
@@ -194,6 +331,30 @@ async function generateTaskPlan(prompt) {
   return JSON.parse(response.text);
 }
 async function generatePanicTriage(taskTitle, subtasks, hoursLeft) {
+  if (getAiProvider() === "ollama") {
+    const url = getOllamaUrl();
+    const model = getOllamaModel();
+    const res = await fetch(`${url}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: 'You are the DeadlineOS Panic Mode Agent. Triage the given subtasks into "must_do" (essential for MVP/survival/deployment) and "skip" (nice-to-have, documentation, cleanups, styles) based on the remaining hours constraint. Output ONLY valid JSON matching this schema:\n{\n  "must_do": ["task1", "task2"],\n  "skip": ["task3"],\n  "justification": "reason"\n}' },
+          { role: "user", content: `Goal/Task: "${taskTitle}"
+Subtasks: ${JSON.stringify(subtasks)}
+Time Remaining: ${hoursLeft} hours` }
+        ],
+        stream: false,
+        format: "json"
+      })
+    });
+    if (!res.ok) throw new Error(`Ollama request failed: ${res.statusText}`);
+    const data = await res.json();
+    return cleanAndParseJson(data.message?.content || "{}");
+  }
   const client = getGeminiClient();
   if (!client) {
     throw new Error("Gemini API Key is missing. Please set it in Settings.");
@@ -234,6 +395,27 @@ Time Remaining: ${hoursLeft} hours`,
   return JSON.parse(response.text);
 }
 async function getVoicePlanningResponse(userSpeechInput) {
+  if (getAiProvider() === "ollama") {
+    const url = getOllamaUrl();
+    const model = getOllamaModel();
+    const res = await fetch(`${url}/api/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: "You are the voice assistant for DeadlineOS, a distraction-free productivity dashboard. Respond to the user request in a single, short, concise, highly motivating sentence (maximum 25 words). Keep it verbal and spoken-friendly." },
+          { role: "user", content: userSpeechInput }
+        ],
+        stream: false
+      })
+    });
+    if (!res.ok) throw new Error(`Ollama request failed: ${res.statusText}`);
+    const data = await res.json();
+    return data.message?.content || "Understood, let us keep pushing toward the deadline.";
+  }
   const client = getGeminiClient();
   if (!client) {
     return "Please set your Gemini API key in settings first.";
