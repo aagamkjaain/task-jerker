@@ -1,7 +1,7 @@
 // server.ts
+import "dotenv/config";
 import express from "express";
 import bodyParser from "body-parser";
-import dotenv from "dotenv";
 import path from "path";
 import axios from "axios";
 import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
@@ -10,10 +10,10 @@ import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 var supabaseUrl = typeof process !== "undefined" && process.env?.SUPABASE_URL || // @ts-ignore
 import.meta.env?.VITE_SUPABASE_URL || // @ts-ignore
-import.meta.env?.SUPABASE_URL || (typeof localStorage !== "undefined" ? localStorage.getItem("SUPABASE_URL") : null) || "";
+import.meta.env?.SUPABASE_URL || (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function" ? localStorage.getItem("SUPABASE_URL") : null) || "";
 var supabaseKey = typeof process !== "undefined" && process.env?.SUPABASE_KEY || // @ts-ignore
 import.meta.env?.VITE_SUPABASE_KEY || // @ts-ignore
-import.meta.env?.SUPABASE_KEY || (typeof localStorage !== "undefined" ? localStorage.getItem("SUPABASE_KEY") : null) || "";
+import.meta.env?.SUPABASE_KEY || (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function" ? localStorage.getItem("SUPABASE_KEY") : null) || "";
 var supabase = createClient(
   supabaseUrl || "https://placeholder.supabase.co",
   supabaseKey || "placeholder"
@@ -135,7 +135,7 @@ function getApiKey() {
   if (typeof process !== "undefined" && process.env?.GEMINI_API_KEY) {
     return process.env.GEMINI_API_KEY;
   }
-  if (typeof localStorage !== "undefined") {
+  if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function") {
     const localKey = localStorage.getItem("GEMINI_API_KEY");
     if (localKey) return localKey;
   }
@@ -153,7 +153,7 @@ function getAiProvider() {
   if (typeof process !== "undefined" && process.env?.AI_PROVIDER) {
     return process.env.AI_PROVIDER === "ollama" ? "ollama" : "gemini";
   }
-  if (typeof localStorage !== "undefined") {
+  if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function") {
     return localStorage.getItem("AI_PROVIDER") || "gemini";
   }
   return "gemini";
@@ -162,7 +162,7 @@ function getOllamaUrl() {
   if (typeof process !== "undefined" && process.env?.OLLAMA_URL) {
     return process.env.OLLAMA_URL;
   }
-  if (typeof localStorage !== "undefined") {
+  if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function") {
     return localStorage.getItem("OLLAMA_URL") || "http://localhost:11434";
   }
   return "http://localhost:11434";
@@ -171,7 +171,7 @@ function getOllamaModel() {
   if (typeof process !== "undefined" && process.env?.OLLAMA_MODEL) {
     return process.env.OLLAMA_MODEL;
   }
-  if (typeof localStorage !== "undefined") {
+  if (typeof localStorage !== "undefined" && localStorage && typeof localStorage.getItem === "function") {
     return localStorage.getItem("OLLAMA_MODEL") || "llama3";
   }
   return "llama3";
@@ -431,7 +431,6 @@ async function getVoicePlanningResponse(userSpeechInput) {
 }
 
 // server.ts
-dotenv.config();
 var app = express();
 var PORT = process.env.PORT || 3001;
 app.use(bodyParser.urlencoded({ extended: true }));

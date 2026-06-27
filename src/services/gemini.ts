@@ -7,7 +7,7 @@ export function getApiKey(): string {
   }
 
   // 2. LocalStorage (client-side browser)
-  if (typeof localStorage !== 'undefined') {
+  if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.getItem === 'function') {
     const localKey = localStorage.getItem('GEMINI_API_KEY');
     if (localKey) return localKey;
   }
@@ -31,7 +31,7 @@ export function getApiKey(): string {
 }
 
 export function saveApiKey(key: string) {
-  if (typeof localStorage !== 'undefined') {
+  if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.setItem === 'function') {
     localStorage.setItem('GEMINI_API_KEY', key);
   }
 }
@@ -40,7 +40,7 @@ export function getAiProvider(): 'gemini' | 'ollama' {
   if (typeof process !== 'undefined' && process.env?.AI_PROVIDER) {
     return (process.env.AI_PROVIDER as any) === 'ollama' ? 'ollama' : 'gemini';
   }
-  if (typeof localStorage !== 'undefined') {
+  if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.getItem === 'function') {
     return (localStorage.getItem('AI_PROVIDER') as any) || 'gemini';
   }
   return 'gemini';
@@ -50,7 +50,7 @@ export function getOllamaUrl(): string {
   if (typeof process !== 'undefined' && process.env?.OLLAMA_URL) {
     return process.env.OLLAMA_URL;
   }
-  if (typeof localStorage !== 'undefined') {
+  if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.getItem === 'function') {
     return localStorage.getItem('OLLAMA_URL') || 'http://localhost:11434';
   }
   return 'http://localhost:11434';
@@ -60,14 +60,14 @@ export function getOllamaModel(): string {
   if (typeof process !== 'undefined' && process.env?.OLLAMA_MODEL) {
     return process.env.OLLAMA_MODEL;
   }
-  if (typeof localStorage !== 'undefined') {
+  if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.getItem === 'function') {
     return localStorage.getItem('OLLAMA_MODEL') || 'llama3';
   }
   return 'llama3';
 }
 
 export function saveOllamaConfigs(provider: 'gemini' | 'ollama', url: string, model: string) {
-  if (typeof localStorage !== 'undefined') {
+  if (typeof localStorage !== 'undefined' && localStorage && typeof localStorage.setItem === 'function') {
     localStorage.setItem('AI_PROVIDER', provider);
     localStorage.setItem('OLLAMA_URL', url);
     localStorage.setItem('OLLAMA_MODEL', model);
