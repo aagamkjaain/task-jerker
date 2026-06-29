@@ -60,6 +60,11 @@ export default function DashboardView({
   const year = now.getFullYear();
   const month = now.getMonth();
 
+  const uniqueProjects = Array.from(new Set(tasks.map(t => t.project).filter(Boolean)));
+  if (!uniqueProjects.includes('Nexus Core')) uniqueProjects.push('Nexus Core');
+  if (!uniqueProjects.includes('Internal Operations')) uniqueProjects.push('Internal Operations');
+  if (!uniqueProjects.includes('Vision 2025')) uniqueProjects.push('Vision 2025');
+
   const monthNames = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
@@ -969,9 +974,9 @@ export default function DashboardView({
                       value={clickedTaskProject}
                       onChange={(e) => setClickedTaskProject(e.target.value)}
                     >
-                      <option value="Nexus Core">Nexus Core</option>
-                      <option value="Internal Operations">Internal Operations</option>
-                      <option value="Vision 2025">Vision 2025</option>
+                      {uniqueProjects.map((project) => (
+                        <option key={project} value={project}>{project}</option>
+                      ))}
                     </select>
                   </div>
 

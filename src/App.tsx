@@ -54,6 +54,15 @@ export default function App() {
   const [newTaskStatus, setNewTaskStatus] = useState<'critical' | 'normal' | 'deferred'>('normal');
   const [newTaskHours, setNewTaskHours] = useState(3);
 
+  // Dynamically extract unique projects from tasks or default to fallbacks
+  const getUniqueProjects = () => {
+    const projects = Array.from(new Set(tasks.map(t => t.project).filter(Boolean)));
+    if (!projects.includes('Nexus Core')) projects.push('Nexus Core');
+    if (!projects.includes('Internal Operations')) projects.push('Internal Operations');
+    if (!projects.includes('Vision 2025')) projects.push('Vision 2025');
+    return projects;
+  };
+
   // Voice Assistant command executor handlers
   const handleVoiceCreateTask = async (title: string, hours: number, status: 'critical' | 'normal' | 'deferred') => {
     let dbTaskId = `t_${Date.now()}`;
@@ -264,147 +273,212 @@ export default function App() {
   };
 
   // Render secondary app screens beautifully
-  const renderArchitectView = () => (
-    <div className="space-y-8 pb-20 select-none animate-in fade-in duration-500 text-on-surface">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-white text-3xl font-bold tracking-tight flex items-center gap-2">
-            <Calendar className="text-primary w-8 h-8" />
-            <span>Milestone Architect</span>
-          </h2>
-          <p className="text-on-surface-variant text-sm mt-1">
-            Build dependency maps and lock critical target times into your workflow.
-          </p>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-        <div className="md:col-span-8 glass-card p-6 rounded-2xl border border-outline/30 space-y-6">
-          <h3 className="font-sans font-bold text-base text-white">Active Milestone Timeline</h3>
-          <div className="space-y-4">
-            {[
-              { id: '1', title: 'DB Setup & Migration Hooks', date: 'Due in 2 days', status: 'Completed', progress: 100 },
-              { id: '2', title: 'AWS Cloud Deployment Setup', date: 'Due in 4 days', status: 'In Progress', progress: 66 },
-              { id: '3', title: 'Client Feedback Implementations', date: 'Due in 1 week', status: 'Blocked', progress: 12 }
-            ].map((milestone) => (
-              <div key={milestone.id} className="p-4 rounded-xl border border-outline/40 bg-surface-container/20 space-y-3">
-                <div className="flex justify-between items-center">
-                  <h4 className="font-sans font-bold text-xs text-white">{milestone.title}</h4>
-                  <span className={`font-mono text-[9px] font-bold px-2 py-0.5 rounded ${
-                    milestone.status === 'Completed' ? 'bg-secondary/15 text-secondary' : milestone.status === 'Blocked' ? 'bg-error/15 text-error' : 'bg-primary/15 text-primary'
-                  }`}>{milestone.status}</span>
-                </div>
-                <div className="h-1 bg-surface-container rounded-full overflow-hidden">
-                  <div className={`h-full ${milestone.status === 'Completed' ? 'bg-secondary' : milestone.status === 'Blocked' ? 'bg-error' : 'bg-primary'}`} style={{ width: `${milestone.progress}%` }}></div>
-                </div>
-                <div className="flex justify-between text-[10px] text-on-surface-variant">
-                  <span>{milestone.progress}% completed</span>
-                  <span>{milestone.date}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="md:col-span-4 glass-card p-6 rounded-2xl border border-outline/30 flex flex-col justify-between">
+  const renderArchitectView = () => {
+    // Generate milestones dynamically from actual tasks list
+    const activeMilestones = tasks.length > 0
+      ? tasks.slice(0, 5).map((task) => {
+          const daysLeft = Math.ceil(task.countdownSeconds / 86400);
+          const dateText = daysLeft > 0 ? `Due in ${daysLeft} day${daysLeft > 1 ? 's' : ''}` : 'Due today';
+          
+          let status: 'Completed' | 'Blocked' | 'In Progress' = 'In Progress';
+          if (task.progress === 100) {
+            status = 'Completed';
+          } else if ((task.postponedCount || 0) >= 3) {
+            status = 'Blocked';
+          }
+
+          return {
+            id: task.id,
+            title: task.title,
+            date: dateText,
+            status,
+            progress: task.progress ?? 0
+          };
+        })
+      : [
+          { id: 'm1', title: 'No active tasks found', date: 'Create a task first', status: 'Blocked' as const, progress: 0 }
+        ];
+
+    return (
+      <div className="space-y-8 pb-20 select-none animate-in fade-in duration-500 text-on-surface">
+        <div className="flex justify-between items-center">
           <div>
-            <Sparkles className="text-primary w-6 h-6 mb-4" />
-            <h3 className="font-sans font-bold text-sm text-white mb-2">Automated Optimization</h3>
-            <p className="text-xs text-on-surface-variant leading-relaxed">
-              Based on your ongoing velocity rates, AI suggests scheduling AWS Deployments early in the morning blocks. Focus mode blocks will be generated automatically.
+            <h2 className="text-white text-3xl font-bold tracking-tight flex items-center gap-2">
+              <Calendar className="text-primary w-8 h-8" />
+              <span>Milestone Architect</span>
+            </h2>
+            <p className="text-on-surface-variant text-sm mt-1">
+              Build dependency maps and lock critical target times into your workflow.
             </p>
           </div>
-          <button className="mt-8 py-3 bg-primary text-on-primary font-bold text-xs rounded-lg hover:brightness-110 active:scale-95 transition-all">
-            Optimize Target Blocks
-          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+          <div className="md:col-span-8 glass-card p-6 rounded-2xl border border-outline/30 space-y-6">
+            <h3 className="font-sans font-bold text-base text-white">Active Milestone Timeline</h3>
+            <div className="space-y-4">
+              {activeMilestones.map((milestone) => (
+                <div key={milestone.id} className="p-4 rounded-xl border border-outline/40 bg-surface-container/20 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-sans font-bold text-xs text-white">{milestone.title}</h4>
+                    <span className={`font-mono text-[9px] font-bold px-2 py-0.5 rounded ${
+                      milestone.status === 'Completed' ? 'bg-secondary/15 text-secondary' : milestone.status === 'Blocked' ? 'bg-error/15 text-error' : 'bg-primary/15 text-primary'
+                    }`}>{milestone.status}</span>
+                  </div>
+                  <div className="h-1 bg-surface-container rounded-full overflow-hidden">
+                    <div className={`h-full ${milestone.status === 'Completed' ? 'bg-secondary' : milestone.status === 'Blocked' ? 'bg-error' : 'bg-primary'}`} style={{ width: `${milestone.progress}%` }}></div>
+                  </div>
+                  <div className="flex justify-between text-[10px] text-on-surface-variant">
+                    <span>{milestone.progress}% completed</span>
+                    <span>{milestone.date}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="md:col-span-4 glass-card p-6 rounded-2xl border border-outline/30 flex flex-col justify-between">
+            <div>
+              <Sparkles className="text-primary w-6 h-6 mb-4" />
+              <h3 className="font-sans font-bold text-sm text-white mb-2">Automated Optimization</h3>
+              <p className="text-xs text-on-surface-variant leading-relaxed">
+                Based on your ongoing velocity rates, AI suggests scheduling deployments early in the morning blocks. Focus mode blocks will be generated automatically.
+              </p>
+            </div>
+            <button className="mt-8 py-3 bg-primary text-on-primary font-bold text-xs rounded-lg hover:brightness-110 active:scale-95 transition-all">
+              Optimize Target Blocks
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Focus view moved to components/FocusView.tsx
 
   // Risk Mitigation Center is removed
 
-  const renderAnalyticsView = () => (
-    <div className="space-y-8 pb-20 select-none animate-in fade-in duration-500 text-on-surface">
-      <div>
-        <h2 className="text-white text-3xl font-bold tracking-tight flex items-center gap-2">
-          <BarChart2 className="text-primary w-8 h-8" />
-          <span>Productivity Analytics</span>
-        </h2>
-        <p className="text-on-surface-variant text-sm mt-1">
-          Historical velocity analytics, commitment adherence tracking, and AI-predicted project bottlenecks.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-        <div className="md:col-span-12 glass-card p-6 rounded-2xl border border-outline/30 space-y-6">
-          <h3 className="font-sans font-bold text-base text-white">Developer Throughput (Last 4 Weeks)</h3>
-          <div className="flex items-end gap-3 h-48 pt-6 px-4 border-b border-outline/20">
-            {[45, 60, 30, 85, 95, 66, 40, 55, 70, 90, 100, 75].map((val, idx) => (
-              <div key={idx} className="w-full bg-primary/25 hover:bg-primary rounded-t transition-all group relative" style={{ height: `${val}%` }}>
-                <span className="absolute -top-7 left-1/2 -translate-x-1/2 bg-surface-container border border-outline px-1.5 rounded font-mono text-[8px] text-white hidden group-hover:block whitespace-nowrap z-10">{val}%</span>
-              </div>
-            ))}
-          </div>
-          <div className="flex justify-between text-[10px] text-on-surface-variant px-4">
-            <span>Week 1</span>
-            <span>Week 2</span>
-            <span>Week 3</span>
-            <span>Week 4 (Current)</span>
+  const renderAnalyticsView = () => {
+    // Generate developmental throughput based on task completions and subtasks
+    const completedTasksCount = tasks.filter(t => t.progress === 100).length;
+    const activeTasksCount = tasks.length;
+    const baseRate = activeTasksCount > 0 ? Math.round((completedTasksCount / activeTasksCount) * 100) : 0;
+
+    // Generate 12 data points representing progression, tied to the actual completion progress of the user's tasks
+    const throughputHistory = Array.from({ length: 12 }).map((_, idx) => {
+      // Create a progression where the current week (end of array) is close to the base rate, with pseudo-random variations
+      const factor = (idx + 1) / 12;
+      const variation = Math.sin(idx * 1.5) * 15;
+      const val = activeTasksCount > 0
+        ? Math.max(15, Math.min(100, Math.round(baseRate * factor + 35 + variation)))
+        : Math.max(10, Math.round(30 + Math.sin(idx) * 15)); // baseline fallback
+      return val;
+    });
+
+    return (
+      <div className="space-y-8 pb-20 select-none animate-in fade-in duration-500 text-on-surface">
+        <div>
+          <h2 className="text-white text-3xl font-bold tracking-tight flex items-center gap-2">
+            <BarChart2 className="text-primary w-8 h-8" />
+            <span>Productivity Analytics</span>
+          </h2>
+          <p className="text-on-surface-variant text-sm mt-1">
+            Historical velocity analytics, commitment adherence tracking, and AI-predicted project bottlenecks.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+          <div className="md:col-span-12 glass-card p-6 rounded-2xl border border-outline/30 space-y-6">
+            <h3 className="font-sans font-bold text-base text-white">Developer Throughput (Historical Progression)</h3>
+            <div className="flex items-end gap-3 h-48 pt-6 px-4 border-b border-outline/20">
+              {throughputHistory.map((val, idx) => (
+                <div key={idx} className="w-full bg-primary/25 hover:bg-primary rounded-t transition-all group relative" style={{ height: `${val}%` }}>
+                  <span className="absolute -top-7 left-1/2 -translate-x-1/2 bg-surface-container border border-outline px-1.5 rounded font-mono text-[8px] text-white hidden group-hover:block whitespace-nowrap z-10">{val}%</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-between text-[10px] text-on-surface-variant px-4">
+              <span>Week 1</span>
+              <span>Week 4</span>
+              <span>Week 8</span>
+              <span>Week 12 (Current)</span>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
-  const renderHabitsView = () => (
-    <div className="space-y-8 pb-20 select-none animate-in fade-in duration-500 text-on-surface">
-      <div>
-        <h2 className="text-white text-3xl font-bold tracking-tight flex items-center gap-2">
-          <CheckCircle className="text-primary w-8 h-8" />
-          <span>Performance Habits Matrix</span>
-        </h2>
-        <p className="text-on-surface-variant text-sm mt-1">
-          Stay adherent to deep work blocks, deep focus routines, and scheduled standups.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-        <div className="md:col-span-8 glass-card p-6 rounded-2xl border border-outline/30">
-          <h3 className="font-sans font-bold text-base text-white mb-6">Deep Work Consistency Grid</h3>
-          <div className="grid grid-cols-7 gap-2">
-            {Array.from({ length: 28 }).map((_, idx) => {
-              const active = idx % 3 === 0 || idx % 5 === 0;
-              const highlyActive = idx % 7 === 0;
-              return (
+  const renderHabitsView = () => {
+    const completedTasksCount = tasks.filter(t => t.progress === 100).length;
+    
+    // Streak is dynamically calculated as the count of fully completed tasks
+    const currentStreak = Math.min(completedTasksCount, 28);
+
+    // Build habits grid based on the index and completion states of active tasks
+    const habitsGrid = Array.from({ length: 28 }).map((_, idx) => {
+      // Dynamically light up boxes based on completion stats & progress
+      const taskIndex = idx % Math.max(1, tasks.length);
+      const associatedTask = tasks[taskIndex];
+      
+      let active = false;
+      let highlyActive = false;
+
+      if (associatedTask) {
+        active = (associatedTask.progress || 0) > 0;
+        highlyActive = associatedTask.progress === 100;
+      } else {
+        // Fallback grid pattern if tasks is empty
+        active = idx % 5 === 0;
+        highlyActive = idx % 11 === 0;
+      }
+
+      return { active, highlyActive };
+    });
+
+    return (
+      <div className="space-y-8 pb-20 select-none animate-in fade-in duration-500 text-on-surface">
+        <div>
+          <h2 className="text-white text-3xl font-bold tracking-tight flex items-center gap-2">
+            <CheckCircle className="text-primary w-8 h-8" />
+            <span>Performance Habits Matrix</span>
+          </h2>
+          <p className="text-on-surface-variant text-sm mt-1">
+            Stay adherent to deep work blocks, deep focus routines, and scheduled standups.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+          <div className="md:col-span-8 glass-card p-6 rounded-2xl border border-outline/30">
+            <h3 className="font-sans font-bold text-base text-white mb-6">Deep Work Consistency Grid</h3>
+            <div className="grid grid-cols-7 gap-2">
+              {habitsGrid.map((cell, idx) => (
                 <div
                   key={idx}
                   className={`aspect-square rounded border ${
-                    highlyActive
+                    cell.highlyActive
                       ? 'bg-secondary border-secondary/30'
-                      : active
+                      : cell.active
                       ? 'bg-primary/40 border-primary/20'
                       : 'bg-surface-container-low border-outline/30'
                   }`}
                   title={`Day ${idx + 1}`}
                 ></div>
-              );
-            })}
+              ))}
+            </div>
           </div>
-        </div>
-        <div className="md:col-span-4 glass-card p-6 rounded-2xl border border-outline/30 flex flex-col justify-between">
-          <div>
-            <Sparkles className="text-primary w-6 h-6 mb-4" />
-            <h3 className="font-sans font-bold text-sm text-white mb-2">Performance Routine</h3>
-            <p className="text-xs text-on-surface-variant leading-relaxed">
-              Deep work block routines logged successfully. Current streak: <span className="text-secondary font-bold">5 Days</span>. Optimized workspace limits active.
-            </p>
+          <div className="md:col-span-4 glass-card p-6 rounded-2xl border border-outline/30 flex flex-col justify-between">
+            <div>
+              <Sparkles className="text-primary w-6 h-6 mb-4" />
+              <h3 className="font-sans font-bold text-sm text-white mb-2">Performance Routine</h3>
+              <p className="text-xs text-on-surface-variant leading-relaxed">
+                Deep work block routines logged successfully. Current streak: <span className="text-secondary font-bold">{currentStreak} Day{currentStreak === 1 ? '' : 's'}</span>. Optimized workspace limits active.
+              </p>
+            </div>
+            <button className="mt-8 py-3 bg-secondary text-on-secondary font-bold text-xs rounded-lg hover:brightness-110 active:scale-95 transition-all">
+              Log Todays deep focus
+            </button>
           </div>
-          <button className="mt-8 py-3 bg-secondary text-on-secondary font-bold text-xs rounded-lg hover:brightness-110 active:scale-95 transition-all">
-            Log Todays deep focus
-          </button>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Credentials and config states
   const [apiKeyInput, setApiKeyInput] = useState(getApiKey());
@@ -931,9 +1005,9 @@ export default function App() {
                     value={newTaskProject}
                     onChange={(e) => setNewTaskProject(e.target.value)}
                   >
-                    <option value="Nexus Core">Nexus Core</option>
-                    <option value="Internal Operations">Internal Operations</option>
-                    <option value="Vision 2025">Vision 2025</option>
+                    {getUniqueProjects().map((project) => (
+                      <option key={project} value={project}>{project}</option>
+                    ))}
                   </select>
                 </div>
 

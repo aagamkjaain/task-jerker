@@ -30,7 +30,7 @@ export default function IntelligenceView({
   initialPrompt,
   setInitialPrompt
 }: IntelligenceViewProps) {
-  const [inputValue, setInputValue] = useState('Plan my AWS exam');
+  const [inputValue, setInputValue] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState(false);
