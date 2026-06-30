@@ -471,16 +471,20 @@ app.post('/api/whatsapp/webhook', async (req, res) => {
 // Serve frontend assets in production
 app.get('/api/ml/productivity/:userId', async (req, res) => {
   const userId = req.params.userId;
+  console.log(`[ML API] Request received for userId: "${userId}"`);
   if (!userId) {
+    console.warn('[ML API] Request rejected: missing userId');
     return res.status(400).json({ error: 'Missing userId parameter' });
   }
 
   try {
     // 1. Fetch user's tasks from Supabase
+    console.log(`[ML API] Fetching tasks from Supabase for user: ${userId}`);
     const userTasks = await getTasksByUserId(userId);
+    console.log(`[ML API] Supabase query complete. Found ${userTasks?.length || 0} tasks.`);
     
     // Map tasks keys matching what predict.py expects
-    const tasksPayload = userTasks.map(t => ({
+    const tasksPayload = (userTasks || []).map(t => ({
       id: t.id,
       title: t.title,
       project: t.project,
@@ -497,10 +501,18 @@ app.get('/api/ml/productivity/:userId', async (req, res) => {
     const { spawn } = await import('child_process');
     const pythonExecutable = process.platform === 'win32' ? 'python' : 'python3';
     
+    console.log(`[ML API] Spawning Python subprocess: "${pythonExecutable} ml_pipeline/predict.py"`);
     const pyProcess = spawn(pythonExecutable, ['ml_pipeline/predict.py']);
     
     let outputData = '';
     let errorData = '';
+
+    pyProcess.on('error', (err) => {
+      console.error('[ML API] Failed to spawn Python process:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to start ML engine', details: err.message });
+      }
+    });
 
     pyProcess.stdout.on('data', (chunk) => {
       outputData += chunk.toString();
@@ -511,27 +523,39 @@ app.get('/api/ml/productivity/:userId', async (req, res) => {
     });
 
     pyProcess.on('close', (code) => {
+      console.log(`[ML API] Python subprocess closed with exit code: ${code}`);
       if (code !== 0) {
-        console.error('Python prediction script error exit code:', code, errorData);
-        return res.status(500).json({ error: 'ML engine error', details: errorData });
+        console.error('[ML API] Python prediction script error:', errorData);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'ML engine error', details: errorData });
+        }
+        return;
       }
 
       try {
+        console.log(`[ML API] Parsing Python stdout payload (length: ${outputData.length})`);
         const result = JSON.parse(outputData.trim());
-        return res.json(result);
+        if (!res.headersSent) {
+          res.json(result);
+        }
       } catch (parseErr) {
-        console.error('Failed to parse Python model response:', outputData, parseErr);
-        return res.status(500).json({ error: 'Failed to parse ML response' });
+        console.error('[ML API] Failed to parse Python model response:', outputData, parseErr);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to parse ML response' });
+        }
       }
     });
 
     // Write inputs JSON string to python process stdin and end stream
+    console.log(`[ML API] Writing tasks payload to Python stdin (payload count: ${tasksPayload.length})`);
     pyProcess.stdin.write(JSON.stringify(tasksPayload));
     pyProcess.stdin.end();
 
   } catch (err: any) {
-    console.error('Error running ML productivity pipeline endpoint:', err);
-    return res.status(500).json({ error: 'Server prediction failure', details: err.message });
+    console.error('[ML API] Fatal error in route handler:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Server prediction failure', details: err.message });
+    }
   }
 });
 
