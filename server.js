@@ -174,7 +174,7 @@ async function generateTaskPlan(prompt, currentDateStr = (/* @__PURE__ */ new Da
   if (getAiProvider() === "ollama") {
     const url = getOllamaUrl();
     const model = getOllamaModel();
-    const systemInstruction = `You are DeadlineOS AI Task Brain.
+    const systemInstruction = `You are Task Jerker AI Task Brain.
 Decompose the goal into subtasks (3 to 6 tasks), estimate the effort required in hours, estimate the difficulty (1 to 10), and estimate the impact (1 to 10).
 
 Identify if a date, deadline, or duration constraint is mentioned in the user's prompt (e.g. "by Friday", "in 3 days", "on June 28th", "deadline is 2026-06-27").
@@ -245,7 +245,7 @@ Output ONLY valid JSON matching this schema:
     contents: `Please break down the following goal/task into a structured plan: "${prompt}".
 The current date and time is: ${currentDateStr}.`,
     config: {
-      systemInstruction: `You are DeadlineOS AI Task Brain.
+      systemInstruction: `You are Task Jerker AI Task Brain.
 Decompose the goal into subtasks (3 to 6 tasks), estimate the effort required in hours, estimate the difficulty (1 to 10), and estimate the impact (1 to 10).
 
 Identify if a date, deadline, or duration constraint is mentioned in the user's prompt (e.g. "by Friday", "in 3 days", "on June 28th", "deadline is 2026-06-27").
@@ -318,7 +318,7 @@ async function generatePanicTriage(taskTitle, subtasks, hoursLeft) {
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: 'You are the DeadlineOS Panic Mode Agent. Triage the given subtasks into "must_do" (essential for MVP/survival/deployment) and "skip" (nice-to-have, documentation, cleanups, styles) based on the remaining hours constraint. Output ONLY valid JSON matching this schema:\n{\n  "must_do": ["task1", "task2"],\n  "skip": ["task3"],\n  "justification": "reason"\n}' },
+          { role: "system", content: 'You are the Task Jerker Panic Mode Agent. Triage the given subtasks into "must_do" (essential for MVP/survival/deployment) and "skip" (nice-to-have, documentation, cleanups, styles) based on the remaining hours constraint. Output ONLY valid JSON matching this schema:\n{\n  "must_do": ["task1", "task2"],\n  "skip": ["task3"],\n  "justification": "reason"\n}' },
           { role: "user", content: `Goal/Task: "${taskTitle}"
 Subtasks: ${JSON.stringify(subtasks)}
 Time Remaining: ${hoursLeft} hours` }
@@ -341,7 +341,7 @@ Time Remaining: ${hoursLeft} hours` }
 Subtasks: ${JSON.stringify(subtasks)}
 Time Remaining: ${hoursLeft} hours`,
     config: {
-      systemInstruction: 'You are the DeadlineOS Panic Mode Agent. Triage the given subtasks into "must_do" (essential for MVP/survival/deployment) and "skip" (nice-to-have, documentation, cleanups, styles) based on the remaining hours constraint. Output ONLY valid JSON matching the specified schema.',
+      systemInstruction: 'You are the Task Jerker Panic Mode Agent. Triage the given subtasks into "must_do" (essential for MVP/survival/deployment) and "skip" (nice-to-have, documentation, cleanups, styles) based on the remaining hours constraint. Output ONLY valid JSON matching the specified schema.',
       responseMimeType: "application/json",
       responseSchema: {
         type: "OBJECT",
@@ -382,7 +382,7 @@ async function getVoicePlanningResponse(userSpeechInput) {
       body: JSON.stringify({
         model,
         messages: [
-          { role: "system", content: "You are the voice assistant for DeadlineOS, a distraction-free productivity dashboard. Respond to the user request in a single, short, concise, highly motivating sentence (maximum 25 words). Keep it verbal and spoken-friendly." },
+          { role: "system", content: "You are the voice assistant for Task Jerker, a distraction-free productivity dashboard. Respond to the user request in a single, short, concise, highly motivating sentence (maximum 25 words). Keep it verbal and spoken-friendly." },
           { role: "user", content: userSpeechInput }
         ],
         stream: false
@@ -400,7 +400,7 @@ async function getVoicePlanningResponse(userSpeechInput) {
     model: "gemini-2.5-flash",
     contents: userSpeechInput,
     config: {
-      systemInstruction: "You are the voice assistant for DeadlineOS, a distraction-free productivity dashboard. Respond to the user request in a single, short, concise, highly motivating sentence (maximum 25 words). Keep it verbal and spoken-friendly."
+      systemInstruction: "You are the voice assistant for Task Jerker, a distraction-free productivity dashboard. Respond to the user request in a single, short, concise, highly motivating sentence (maximum 25 words). Keep it verbal and spoken-friendly."
     }
   });
   return response.text || "Understood, let us keep pushing toward the deadline.";
@@ -459,7 +459,7 @@ async function executeUserIntent(userId, messageText) {
   const intent = await classifyIntent(messageText);
   switch (intent) {
     case "HELP": {
-      const helpMessage = `\u{1F916} *DeadlineOS Commands Guide*
+      const helpMessage = `\u{1F916} *Task Jerker Commands Guide*
       
 \u2022 *today* / *plan* - Get your daily briefing & active focus blocks
 \u2022 *done [task name/number]* - Complete a subtask
@@ -579,7 +579,7 @@ async function executeUserIntent(userId, messageText) {
       const latestRisk = await getLatestRisk(userId);
       const currentRiskLevel = latestRisk ? latestRisk.risk_level.toUpperCase() : "LOW";
       const currentReason = latestRisk ? latestRisk.reason : "All schedules are on time.";
-      let reply = `\u26A0\uFE0F *DeadlineOS Schedule Audit*
+      let reply = `\u26A0\uFE0F *Task Jerker Schedule Audit*
       
 \u2022 General System Risk: *${currentRiskLevel}*
 \u2022 Details: ${currentReason}
@@ -813,7 +813,7 @@ async function handleTelegramMessage(botUrl, message) {
             chatId,
             `\u{1F389} *Account Connected Successfully!*
 
-Your Telegram account has been linked to your DeadlineOS account.
+Your Telegram account has been linked to your Task Jerker account.
 
 You can now send me goals and deadlines (e.g. "Plan AWS exam due Friday") or run commands like *today*, *risk*, *panic*, and *reschedule* directly from here!`
           );
@@ -833,7 +833,7 @@ You can now send me goals and deadlines (e.g. "Plan AWS exam due Friday") or run
     await sendTelegramMessage(
       botUrl,
       chatId,
-      `\u{1F916} *Welcome to your DeadlineOS AI Assistant!*
+      `\u{1F916} *Welcome to your Task Jerker AI Assistant!*
       
 Send me a goal or deadline (e.g. "I have a hackathon on 24th June"), and I will decompose it into a structured Action Plan, save it, and sync it to Google Calendar.
 
@@ -859,7 +859,7 @@ To pair your account, click the link in your Web Settings dashboard.`
       chatId,
       `\u{1F4F1} *Telegram Account Not Linked*
 
-Your Telegram chat is not connected to a DeadlineOS profile.
+Your Telegram chat is not connected to a Task Jerker profile.
 
 Please log in to the web dashboard, go to Settings, and click *Connect Telegram Bot* to pair your account.`
     );
