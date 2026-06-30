@@ -50,6 +50,10 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 
 
 /**
